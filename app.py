@@ -6,7 +6,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import json
 import base64
-import os
 
 # ─────────────────────────────────────────────
 # CONFIGURACIÓN
@@ -22,13 +21,12 @@ TIPOS_COMBUSTIBLE         = ["Gasolina", "Diésel", "Eléctrico", "Híbrido"]
 MODOS_SIN_COMBUSTIBLE     = ["Transporte público (bus / metro / tren)", "A pie o en bicicleta"]
 TODOS_MODOS               = VEHICULOS_CON_COMBUSTIBLE + MODOS_SIN_COMBUSTIBLE
 
-# Colores corporativos Argia
-COLOR_ROSA      = "#F4A7B4"
-COLOR_VERDE     = "#A8D5B5"
-COLOR_TURQUESA  = "#7BC4C4"
-COLOR_GRIS      = "#6B6B6B"
-COLOR_FONDO     = "#F9F9F9"
-COLOR_BLANCO    = "#FFFFFF"
+COLOR_TURQUESA = "#7BC4C4"
+COLOR_ROSA     = "#F4A7B4"
+COLOR_VERDE    = "#A8D5B5"
+COLOR_GRIS     = "#6B6B6B"
+COLOR_FONDO    = "#F9F9F9"
+COLOR_BLANCO   = "#FFFFFF"
 
 # ─────────────────────────────────────────────
 # UTILIDADES
@@ -50,12 +48,21 @@ def cargar_datos():
     df_imp.columns  = df_imp.columns.str.strip()
     df_cent.columns = df_cent.columns.str.strip()
 
-    # Código como string con ceros a la izquierda (4 dígitos)
     df_trab["CODIGO"] = df_trab["CODIGO"].astype(int).apply(lambda x: str(x).zfill(4))
     df_imp["CODIGO"]  = df_imp["CODIGO"].astype(int).apply(lambda x: str(x).zfill(4))
     df_trab["DNI"]    = df_trab["DNI"].astype(str).str.strip().str.upper()
     df_imp["CENTRO"]  = df_imp["CENTRO"].astype(str).str.strip()
     df_imp["IMPUTACION"] = pd.to_numeric(df_imp["IMPUTACION"], errors="coerce")
+
+    # Parsear coordenadas de centros
+    def parsear_coords(val):
+        try:
+            partes = str(val).split(",")
+            return float(partes[0].strip()), float(partes[1].strip())
+        except Exception:
+            return None, None
+
+    df_cent["LAT"], df_cent["LON"] = zip(*df_cent["COORDENADAS"].apply(parsear_coords))
 
     return df_trab, df_imp, df_cent
 
@@ -66,7 +73,7 @@ def geocodificar(direccion, api_key):
         r    = requests.get(url, params=params, timeout=10)
         data = r.json()
         coords = data["features"][0]["geometry"]["coordinates"]
-        return coords[0], coords[1]
+        return coords[0], coords[1]  # lon, lat
     except Exception:
         return None, None
 
@@ -81,9 +88,6 @@ def calcular_km(origen, destino, api_key):
         return round(metros / 1000, 2)
     except Exception:
         return None
-
-def construir_dir_centro(row):
-    return f"{row['CALLE']} {row['NUMERO']}, {row['MUNICIPIO']}, {row['COD_POSTAL']}, España"
 
 def guardar_en_sheets(filas):
     try:
@@ -114,36 +118,8 @@ def guardar_en_sheets(filas):
 def inyectar_css():
     st.markdown(f"""
     <style>
-    /* Fondo general */
     .stApp {{ background-color: {COLOR_FONDO}; }}
-
-    /* Ocultar menú hamburguesa y footer */
     #MainMenu, footer {{ visibility: hidden; }}
-
-    /* Header corporativo */
-    .header-box {{
-        background: {COLOR_BLANCO};
-        border-bottom: 4px solid {COLOR_TURQUESA};
-        padding: 1rem 1.5rem 0.8rem 1.5rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 1.5rem;
-        border-radius: 0 0 8px 8px;
-    }}
-    .header-titulo {{
-        font-size: 1.4rem;
-        font-weight: bold;
-        color: {COLOR_GRIS};
-        margin: 0;
-    }}
-    .header-subtitulo {{
-        font-size: 0.9rem;
-        color: #999;
-        margin: 0;
-    }}
-
-    /* Cajas de información */
     .info-box {{
         background: {COLOR_BLANCO};
         border-left: 5px solid {COLOR_TURQUESA};
@@ -168,8 +144,6 @@ def inyectar_css():
         border-radius: 6px;
         margin-bottom: 0.8rem;
     }}
-
-    /* Tags de centros */
     .centro-tag {{
         background: {COLOR_TURQUESA};
         color: white;
@@ -180,8 +154,6 @@ def inyectar_css():
         margin: 3px;
         font-weight: 500;
     }}
-
-    /* Secciones */
     .seccion-titulo {{
         font-size: 1.05rem;
         font-weight: bold;
@@ -191,8 +163,6 @@ def inyectar_css():
         margin-top: 1.5rem;
         margin-bottom: 0.8rem;
     }}
-
-    /* Resultado km */
     .km-box {{
         background: {COLOR_BLANCO};
         border: 1px solid {COLOR_VERDE};
@@ -202,8 +172,6 @@ def inyectar_css():
         margin-bottom: 0.6rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }}
-
-    /* Botón principal */
     .stButton > button {{
         background-color: {COLOR_TURQUESA} !important;
         color: white !important;
@@ -214,12 +182,6 @@ def inyectar_css():
     }}
     .stButton > button:hover {{
         background-color: {COLOR_VERDE} !important;
-    }}
-
-    /* Inputs */
-    .stTextInput > div > div > input {{
-        border-radius: 6px !important;
-        border: 1px solid #DDD !important;
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -241,15 +203,18 @@ def main():
     with col_txt:
         st.markdown(f"""
         <div>
-            <p class="header-titulo">🌱 Huella de Carbono 2025</p>
-            <p class="header-subtitulo">Registro de desplazamientos al trabajo</p>
+            <p style="font-size:1.4rem;font-weight:bold;color:{COLOR_GRIS};margin:0;">
+                🌱 Huella de Carbono 2025</p>
+            <p style="font-size:0.9rem;color:#999;margin:0;">
+                Registro de desplazamientos al trabajo</p>
         </div>
         """, unsafe_allow_html=True)
     with col_logo:
         if logo_b64:
             st.markdown(f"""
-            <div style="text-align:right; padding-top:4px;">
-                <img src="data:image/png;base64,{logo_b64}" style="max-height:70px; max-width:180px;">
+            <div style="text-align:right;padding-top:4px;">
+                <img src="data:image/png;base64,{logo_b64}"
+                     style="max-height:70px;max-width:180px;">
             </div>
             """, unsafe_allow_html=True)
 
@@ -267,14 +232,14 @@ def main():
     st.markdown('<div class="seccion-titulo">🔐 Identificación</div>', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
-        codigo_input = st.text_input("Código de trabajador/a (4 dígitos)", placeholder="Ej: 0129", max_chars=4).strip()
+        codigo_input = st.text_input("Código de trabajador/a (4 dígitos)",
+                                     placeholder="Ej: 0129", max_chars=4).strip()
     with col2:
         dni = st.text_input("DNI", placeholder="Ej: 72263087P").strip().upper()
 
     if not codigo_input or not dni:
         st.stop()
 
-    # Normalizar código a 4 dígitos con ceros
     try:
         codigo = str(int(codigo_input)).zfill(4)
     except ValueError:
@@ -282,7 +247,6 @@ def main():
         st.stop()
 
     trabajador = df_trab[(df_trab["CODIGO"] == codigo) & (df_trab["DNI"] == dni)]
-
     if trabajador.empty:
         st.error("❌ Código o DNI incorrecto. Por favor comprueba los datos.")
         st.stop()
@@ -291,9 +255,7 @@ def main():
     nombre = row["NOMBRE"]
 
     st.markdown(f"""
-    <div class="exito">
-    ✅ Bienvenida/o, <strong>{nombre}</strong>
-    </div>
+    <div class="exito">✅ Bienvenida/o, <strong>{nombre}</strong></div>
     """, unsafe_allow_html=True)
 
     # ── PASO 2: DATOS DEL TRABAJADOR ─────────
@@ -305,7 +267,8 @@ def main():
 
     st.markdown(f"""
     <div class="info-box">
-    📍 <strong>Domicilio registrado:</strong> {domicilio_original}, {municipio_original} ({cp_original})
+    📍 <strong>Domicilio registrado:</strong>
+    {domicilio_original}, {municipio_original} ({cp_original})
     </div>
     """, unsafe_allow_html=True)
 
@@ -320,7 +283,8 @@ def main():
     st.markdown(tags + "<br><br>", unsafe_allow_html=True)
 
     # ── PASO 3: VERIFICAR DOMICILIO ───────────
-    st.markdown('<div class="seccion-titulo">🏠 Domicilio habitual</div>', unsafe_allow_html=True)
+    st.markdown('<div class="seccion-titulo">🏠 Domicilio habitual</div>',
+                unsafe_allow_html=True)
 
     domicilio_correcto = st.radio(
         "¿Tu domicilio habitual es correcto?",
@@ -328,16 +292,17 @@ def main():
         index=0,
     )
 
-    domicilio_final  = domicilio_original
-    municipio_final  = municipio_original
-    cp_final         = cp_original
+    domicilio_final     = domicilio_original
+    municipio_final     = municipio_original
+    cp_final            = cp_original
     domicilio_corregido = False
 
     if domicilio_correcto == "No, quiero corregirlo":
         st.markdown("**Introduce tu domicilio habitual actual:**")
         col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
-            domicilio_final = st.text_input("Calle y número", placeholder="Ej: Calle Mayor 5 2A")
+            domicilio_final = st.text_input("Calle y número",
+                                            placeholder="Ej: Calle Mayor 5 2A")
         with col2:
             municipio_final = st.text_input("Municipio", placeholder="Ej: Bilbao")
         with col3:
@@ -349,12 +314,13 @@ def main():
         domicilio_corregido = True
 
     # ── PASO 4: MODO DE TRANSPORTE POR CENTRO ─
-    st.markdown('<div class="seccion-titulo">🚗 Modo de transporte</div>', unsafe_allow_html=True)
+    st.markdown('<div class="seccion-titulo">🚗 Modo de transporte</div>',
+                unsafe_allow_html=True)
     st.caption("Indica cómo te desplazas habitualmente a cada centro de trabajo.")
 
-    modos_por_centro = {}
+    modos_por_centro      = {}
     combustible_por_centro = {}
-    todo_completado = True
+    todo_completado       = True
 
     for _, centro_row in centros_trab.iterrows():
         centro = centro_row["CENTRO"]
@@ -370,8 +336,8 @@ def main():
 
         if modo == "— Selecciona —":
             todo_completado = False
+            modos_por_centro[centro]      = ""
             combustible_por_centro[centro] = ""
-            modos_por_centro[centro] = ""
             continue
 
         modos_por_centro[centro] = modo
@@ -396,21 +362,25 @@ def main():
         st.stop()
 
     # ── PASO 5: CALCULAR KM ───────────────────
-    st.markdown('<div class="seccion-titulo">📏 Cálculo de distancias</div>', unsafe_allow_html=True)
+    st.markdown('<div class="seccion-titulo">📏 Cálculo de distancias</div>',
+                unsafe_allow_html=True)
 
-    if st.button("✅ Calcular distancias y confirmar", type="primary", use_container_width=True):
+    if st.button("✅ Calcular distancias y confirmar",
+                 type="primary", use_container_width=True):
 
         if not ORS_API_KEY:
-            st.error("⚠️ No se ha configurado la clave de OpenRouteService. Contacta con el administrador.")
+            st.error("⚠️ No se ha configurado la clave de OpenRouteService.")
             st.stop()
 
-        direccion_origen = f"{domicilio_final}, {municipio_final}, {cp_final}, España"
+        direccion_origen = (f"{domicilio_final}, {municipio_final}, "
+                            f"{cp_final}, España")
 
         with st.spinner("Calculando distancias..."):
             lon_orig, lat_orig = geocodificar(direccion_origen, ORS_API_KEY)
 
             if lon_orig is None:
-                st.error("❌ No se ha podido geolocalizar tu domicilio. Comprueba la dirección e inténtalo de nuevo.")
+                st.error("❌ No se ha podido geolocalizar tu domicilio. "
+                         "Comprueba la dirección e inténtalo de nuevo.")
                 st.stop()
 
             resultados   = []
@@ -418,24 +388,26 @@ def main():
             errores      = []
 
             for _, centro_row in centros_trab.iterrows():
-                centro       = centro_row["CENTRO"]
-                imputacion   = centro_row["IMPUTACION_%"]
-                modo         = modos_por_centro.get(centro, "")
-                combustible  = combustible_por_centro.get(centro, "")
+                centro      = centro_row["CENTRO"]
+                imputacion  = centro_row["IMPUTACION_%"]
+                modo        = modos_por_centro.get(centro, "")
+                combustible = combustible_por_centro.get(centro, "")
 
-                centro_data = df_cent[df_cent.iloc[:, 0].str.strip() == centro]
-                if centro_data.empty:
+                # Buscar coordenadas del centro directamente
+                centro_data = df_cent[df_cent["CENTRO"].str.strip() == centro]
+                if centro_data.empty or pd.isna(centro_data.iloc[0]["LAT"]):
                     errores.append(centro)
                     continue
 
-                dir_centro           = construir_dir_centro(centro_data.iloc[0])
-                lon_dest, lat_dest   = geocodificar(dir_centro, ORS_API_KEY)
+                lat_dest = centro_data.iloc[0]["LAT"]
+                lon_dest = centro_data.iloc[0]["LON"]
 
-                if lon_dest is None:
-                    errores.append(centro)
-                    continue
-
-                km = calcular_km((lon_orig, lat_orig), (lon_dest, lat_dest), ORS_API_KEY)
+                # ORS usa (lon, lat)
+                km = calcular_km(
+                    (lon_orig, lat_orig),
+                    (lon_dest, lat_dest),
+                    ORS_API_KEY
+                )
 
                 if km is None:
                     errores.append(centro)
@@ -459,7 +431,8 @@ def main():
         if resultados:
             st.markdown("**Distancias calculadas:**")
             for r in resultados:
-                comb_txt = f" — {r['combustible']}" if r['combustible'] and r['combustible'] != "—" else ""
+                comb_txt = (f" — {r['combustible']}"
+                            if r['combustible'] and r['combustible'] != "—" else "")
                 st.markdown(f"""
                 <div class="km-box">
                 🏢 <strong>{r['centro']}</strong> ({r['imputacion']}% del tiempo)<br>
@@ -469,7 +442,8 @@ def main():
                 """, unsafe_allow_html=True)
 
             if errores:
-                st.warning(f"⚠️ No se pudo calcular la distancia para: {', '.join(errores)}.")
+                st.warning(f"⚠️ No se pudo calcular la distancia para: "
+                           f"{', '.join(errores)}.")
 
             guardado = guardar_en_sheets(filas_sheets)
             if guardado:
@@ -480,7 +454,8 @@ def main():
                 """, unsafe_allow_html=True)
                 st.balloons()
             else:
-                st.warning("⚠️ Los datos se han calculado pero no se han podido guardar. Contacta con el administrador.")
+                st.warning("⚠️ Los datos se han calculado pero no se han podido guardar. "
+                           "Contacta con el administrador.")
         else:
             st.error("❌ No se han podido calcular las distancias. Inténtalo de nuevo.")
 
