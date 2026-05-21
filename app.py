@@ -54,7 +54,6 @@ def cargar_datos():
     df_imp["CENTRO"]  = df_imp["CENTRO"].astype(str).str.strip()
     df_imp["IMPUTACION"] = pd.to_numeric(df_imp["IMPUTACION"], errors="coerce")
 
-    # Parsear coordenadas de centros
     def parsear_coords(val):
         try:
             partes = str(val).split(",")
@@ -66,18 +65,24 @@ def cargar_datos():
 
     return df_trab, df_imp, df_cent
 
-def geocodificar(direccion, api_key):
-    url    = "https://api.openrouteservice.org/geocode/search"
-    params = {"api_key": api_key, "text": direccion, "boundary.country": "ES", "size": 1}
+
+def geocodificar_nominatim(direccion):
+    """Geocodifica usando Nominatim (OpenStreetMap) — mejor con direcciones españolas."""
+    url     = "https://nominatim.openstreetmap.org/search"
+    params  = {"q": direccion, "format": "json", "limit": 1, "countrycodes": "es"}
+    headers = {"User-Agent": "ArgiaCarbonApp/1.0"}
     try:
-        r    = requests.get(url, params=params, timeout=10)
+        r    = requests.get(url, params=params, headers=headers, timeout=10)
         data = r.json()
-        coords = data["features"][0]["geometry"]["coordinates"]
-        return coords[0], coords[1]  # lon, lat
+        lat  = float(data[0]["lat"])
+        lon  = float(data[0]["lon"])
+        return lon, lat
     except Exception:
         return None, None
 
+
 def calcular_km(origen, destino, api_key):
+    """Calcula km por carretera entre dos puntos (lon, lat) usando OpenRouteService."""
     url     = "https://api.openrouteservice.org/v2/directions/driving-car"
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
     body    = {"coordinates": [list(origen), list(destino)]}
@@ -89,10 +94,11 @@ def calcular_km(origen, destino, api_key):
     except Exception:
         return None
 
+
 def guardar_en_sheets(filas):
     try:
-        scope = ["https://spreadsheets.google.com/feeds",
-                 "https://www.googleapis.com/auth/drive"]
+        scope      = ["https://spreadsheets.google.com/feeds",
+                      "https://www.googleapis.com/auth/drive"]
         creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
         creds      = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client     = gspread.authorize(creds)
@@ -111,6 +117,7 @@ def guardar_en_sheets(filas):
     except Exception as e:
         st.error(f"Error al guardar en Google Sheets: {e}")
         return False
+
 
 # ─────────────────────────────────────────────
 # CSS CORPORATIVO
@@ -185,6 +192,7 @@ def inyectar_css():
     }}
     </style>
     """, unsafe_allow_html=True)
+
 
 # ─────────────────────────────────────────────
 # APP PRINCIPAL
@@ -318,9 +326,9 @@ def main():
                 unsafe_allow_html=True)
     st.caption("Indica cómo te desplazas habitualmente a cada centro de trabajo.")
 
-    modos_por_centro      = {}
+    modos_por_centro       = {}
     combustible_por_centro = {}
-    todo_completado       = True
+    todo_completado        = True
 
     for _, centro_row in centros_trab.iterrows():
         centro = centro_row["CENTRO"]
@@ -336,7 +344,7 @@ def main():
 
         if modo == "— Selecciona —":
             todo_completado = False
-            modos_por_centro[centro]      = ""
+            modos_por_centro[centro]       = ""
             combustible_por_centro[centro] = ""
             continue
 
@@ -372,12 +380,12 @@ def main():
             st.error("⚠️ No se ha configurado la clave de OpenRouteService.")
             st.stop()
 
-        direccion_origen = (f"{domicilio_final}, {cp_final}, España")
+        # Geocodificar domicilio con Nominatim (OpenStreetMap)
+        direccion_origen = f"{domicilio_final}, {municipio_final}, {cp_final}, España"
 
         with st.spinner("Calculando distancias..."):
-            lon_orig, lat_orig = geocodificar(direccion_origen, ORS_API_KEY)
-            st.write(f"DEBUG domicilio: {direccion_origen}")
-            st.write(f"DEBUG coords domicilio: LON={lon_orig}, LAT={lat_orig}")
+            lon_orig, lat_orig = geocodificar_nominatim(direccion_origen)
+
             if lon_orig is None:
                 st.error("❌ No se ha podido geolocalizar tu domicilio. "
                          "Comprueba la dirección e inténtalo de nuevo.")
@@ -393,7 +401,6 @@ def main():
                 modo        = modos_por_centro.get(centro, "")
                 combustible = combustible_por_centro.get(centro, "")
 
-                # Buscar coordenadas del centro directamente
                 centro_data = df_cent[df_cent["CENTRO"].str.strip() == centro]
                 if centro_data.empty or pd.isna(centro_data.iloc[0]["LAT"]):
                     errores.append(centro)
@@ -401,9 +408,7 @@ def main():
 
                 lat_dest = centro_data.iloc[0]["LAT"]
                 lon_dest = centro_data.iloc[0]["LON"]
-                st.write(f"DEBUG {centro}: LAT={lat_dest}, LON={lon_dest}")
 
-                # ORS usa (lon, lat)
                 km = calcular_km(
                     (lon_orig, lat_orig),
                     (lon_dest, lat_dest),
