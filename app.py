@@ -55,10 +55,8 @@ def cargar_datos():
     # ── Descargar XLS desde Google Drive ──
     creds   = get_google_creds()
     service = build("drive", "v3", credentials=creds)
-    request = service.files().export_media(
-        fileId=DRIVE_FILE_ID,
-        mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    request = service.files().get_media(fileId=DRIVE_FILE_ID)
+
     buffer = io.BytesIO()
     downloader = MediaIoBaseDownload(buffer, request)
     done = False
