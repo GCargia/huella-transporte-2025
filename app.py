@@ -401,6 +401,7 @@ def main():
 
                 lat_dest = centro_data.iloc[0]["LAT"]
                 lon_dest = centro_data.iloc[0]["LON"]
+                st.write(f"DEBUG {centro}: LAT={lat_dest}, LON={lon_dest}")
 
                 # ORS usa (lon, lat)
                 km = calcular_km(
