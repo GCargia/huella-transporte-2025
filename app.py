@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
+import re
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import json
@@ -66,19 +67,68 @@ def cargar_datos():
     return df_trab, df_imp, df_cent
 
 
-def geocodificar_nominatim(direccion):
-    """Geocodifica usando Nominatim (OpenStreetMap) — mejor con direcciones españolas."""
-    url     = "https://nominatim.openstreetmap.org/search"
-    params  = {"q": direccion, "format": "json", "limit": 1, "countrycodes": "es"}
+def limpiar_direccion(direccion):
+    """Expande abreviaturas comunes en direcciones españolas para Nominatim."""
+    reemplazos = [
+        (r"^CL\b",   "Calle"),
+        (r"^C/\b",   "Calle"),
+        (r"^C\b",    "Calle"),
+        (r"^AV\b",   "Avenida"),
+        (r"^AVD\b",  "Avenida"),
+        (r"^AVDA\b", "Avenida"),
+        (r"^PZ\b",   "Plaza"),
+        (r"^PL\b",   "Plaza"),
+        (r"^PS\b",   "Paseo"),
+        (r"^PSO\b",  "Paseo"),
+        (r"^BO\b",   "Barrio"),
+        (r"^Bº\b",   "Barrio"),
+        (r"^URB\b",  "Urbanización"),
+        (r"^CTRA\b", "Carretera"),
+        (r"^CR\b",   "Carretera"),
+    ]
+    d = direccion.strip()
+    for patron, reemplazo in reemplazos:
+        d = re.sub(patron, reemplazo, d, flags=re.IGNORECASE)
+    # Eliminar referencias de piso/puerta que confunden a Nominatim
+    # Ejemplo: "Calle Mayor 5 2 A" -> "Calle Mayor 5"
+    d = re.sub(r"(\d+)\s+\d+\s*[A-Za-z]?\s*$", r"\1", d)
+    return d.strip()
+
+
+def geocodificar_nominatim(domicilio, municipio, cp):
+    """
+    Intenta geocodificar con varias estrategias progresivas
+    hasta obtener coordenadas válidas en el País Vasco.
+    """
+    domicilio_limpio = limpiar_direccion(domicilio)
+
+    intentos = [
+        f"{domicilio_limpio}, {municipio}, {cp}, España",
+        f"{domicilio_limpio}, {municipio}, España",
+        f"{domicilio_limpio}, {cp}, España",
+        f"{municipio}, {cp}, España",
+        f"{cp}, España",
+    ]
+
     headers = {"User-Agent": "ArgiaCarbonApp/1.0"}
-    try:
-        r    = requests.get(url, params=params, headers=headers, timeout=10)
-        data = r.json()
-        lat  = float(data[0]["lat"])
-        lon  = float(data[0]["lon"])
-        return lon, lat
-    except Exception:
-        return None, None
+
+    for intento in intentos:
+        try:
+            url    = "https://nominatim.openstreetmap.org/search"
+            params = {"q": intento, "format": "json", "limit": 1, "countrycodes": "es"}
+            r      = requests.get(url, params=params, headers=headers, timeout=10)
+            data   = r.json()
+            if data:
+                lat = float(data[0]["lat"])
+                lon = float(data[0]["lon"])
+                # Verificar que las coordenadas son del País Vasco / norte de España
+                # Bizkaia, Gipuzkoa, Álava están entre lat 42.5-43.5, lon -3.5 a -1.7
+                if 41.0 <= lat <= 44.5 and -5.0 <= lon <= 2.0:
+                    return lon, lat
+        except Exception:
+            continue
+
+    return None, None
 
 
 def calcular_km(origen, destino, api_key):
@@ -380,15 +430,17 @@ def main():
             st.error("⚠️ No se ha configurado la clave de OpenRouteService.")
             st.stop()
 
-        # Geocodificar domicilio con Nominatim (OpenStreetMap)
-        direccion_origen = f"{domicilio_final}, {municipio_final}, {cp_final}, España"
-
         with st.spinner("Calculando distancias..."):
-            lon_orig, lat_orig = geocodificar_nominatim(direccion_origen)
+            lon_orig, lat_orig = geocodificar_nominatim(
+                domicilio_final, municipio_final, cp_final
+            )
 
             if lon_orig is None:
-                st.error("❌ No se ha podido geolocalizar tu domicilio. "
-                         "Comprueba la dirección e inténtalo de nuevo.")
+                st.error(
+                    "❌ No se ha podido geolocalizar tu domicilio. "
+                    "Si tu dirección es correcta, selecciona 'No, quiero corregirlo' "
+                    "e introduce la dirección en formato: Calle Mayor 5, Bilbao, 48001."
+                )
                 st.stop()
 
             resultados   = []
