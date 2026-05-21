@@ -377,7 +377,8 @@ def main():
 
         with st.spinner("Calculando distancias..."):
             lon_orig, lat_orig = geocodificar(direccion_origen, ORS_API_KEY)
-
+            st.write(f"DEBUG domicilio: {direccion_origen}")
+            st.write(f"DEBUG coords domicilio: LON={lon_orig}, LAT={lat_orig}")
             if lon_orig is None:
                 st.error("❌ No se ha podido geolocalizar tu domicilio. "
                          "Comprueba la dirección e inténtalo de nuevo.")
