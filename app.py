@@ -38,7 +38,7 @@ def get_logo_base64(path):
     except Exception:
         return None
 
-@st.cache_data
+@st.cache_data(ttl=0)
 def cargar_datos():
     df_trab = pd.read_excel(FICHERO_TRABAJADORES, engine="xlrd", sheet_name="TRABAJADORES")
     df_imp  = pd.read_excel(FICHERO_TRABAJADORES, engine="xlrd", sheet_name="IMPUTACIONES")
