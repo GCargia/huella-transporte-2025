@@ -372,8 +372,7 @@ def main():
             st.error("⚠️ No se ha configurado la clave de OpenRouteService.")
             st.stop()
 
-        direccion_origen = (f"{domicilio_final}, {municipio_final}, "
-                            f"{cp_final}, España")
+        direccion_origen = (f"{domicilio_final}, {cp_final}, España")
 
         with st.spinner("Calculando distancias..."):
             lon_orig, lat_orig = geocodificar(direccion_origen, ORS_API_KEY)
