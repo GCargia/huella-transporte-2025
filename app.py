@@ -3,15 +3,18 @@ import pandas as pd
 import requests
 import gspread
 import re
+import io
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import json
 import base64
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 # ─────────────────────────────────────────────
 # CONFIGURACIÓN
 # ─────────────────────────────────────────────
-FICHERO_TRABAJADORES = "Informe_trabajadores_domicilio_imputacion.XLS"
+DRIVE_FILE_ID        = "1vW-2w-KTfAkOd-QrDOg-Tg40MSjMDdpr"
 FICHERO_CENTROS      = "DIRECCIONES_CENTROS.xlsx"
 LOGO_PATH            = "LOGO_ARGIA_2026.png"
 ORS_API_KEY          = st.secrets.get("ORS_API_KEY", "")
@@ -39,10 +42,35 @@ def get_logo_base64(path):
     except Exception:
         return None
 
+def get_google_creds():
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+    return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+
 @st.cache_data(ttl=0)
 def cargar_datos():
-    df_trab = pd.read_excel(FICHERO_TRABAJADORES, engine="xlrd", sheet_name="TRABAJADORES")
-    df_imp  = pd.read_excel(FICHERO_TRABAJADORES, engine="xlrd", sheet_name="IMPUTACIONES")
+    # ── Descargar XLS desde Google Drive ──
+    creds   = get_google_creds()
+    service = build("drive", "v3", credentials=creds)
+    request = service.files().export_media(
+        fileId=DRIVE_FILE_ID,
+        mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    buffer.seek(0)
+
+    df_trab = pd.read_excel(buffer, sheet_name="TRABAJADORES")
+    buffer.seek(0)
+    df_imp  = pd.read_excel(buffer, sheet_name="IMPUTACIONES")
+
+    # ── Cargar centros desde fichero local ──
     df_cent = pd.read_excel(FICHERO_CENTROS)
 
     df_trab.columns = df_trab.columns.str.strip()
@@ -68,7 +96,6 @@ def cargar_datos():
 
 
 def limpiar_direccion(direccion):
-    """Expande abreviaturas comunes en direcciones españolas para Nominatim."""
     reemplazos = [
         (r"^CL\b",   "Calle"),
         (r"^C/\b",   "Calle"),
@@ -89,19 +116,12 @@ def limpiar_direccion(direccion):
     d = direccion.strip()
     for patron, reemplazo in reemplazos:
         d = re.sub(patron, reemplazo, d, flags=re.IGNORECASE)
-    # Eliminar referencias de piso/puerta que confunden a Nominatim
-    # Ejemplo: "Calle Mayor 5 2 A" -> "Calle Mayor 5"
     d = re.sub(r"(\d+)\s+\d+\s*[A-Za-z]?\s*$", r"\1", d)
     return d.strip()
 
 
 def geocodificar_nominatim(domicilio, municipio, cp):
-    """
-    Intenta geocodificar con varias estrategias progresivas
-    hasta obtener coordenadas válidas en el País Vasco.
-    """
     domicilio_limpio = limpiar_direccion(domicilio)
-
     intentos = [
         f"{domicilio_limpio}, {municipio}, {cp}, España",
         f"{domicilio_limpio}, {municipio}, España",
@@ -109,9 +129,7 @@ def geocodificar_nominatim(domicilio, municipio, cp):
         f"{municipio}, {cp}, España",
         f"{cp}, España",
     ]
-
     headers = {"User-Agent": "ArgiaCarbonApp/1.0"}
-
     for intento in intentos:
         try:
             url    = "https://nominatim.openstreetmap.org/search"
@@ -121,18 +139,14 @@ def geocodificar_nominatim(domicilio, municipio, cp):
             if data:
                 lat = float(data[0]["lat"])
                 lon = float(data[0]["lon"])
-                # Verificar que las coordenadas son del País Vasco / norte de España
-                # Bizkaia, Gipuzkoa, Álava están entre lat 42.5-43.5, lon -3.5 a -1.7
                 if 41.0 <= lat <= 44.5 and -5.0 <= lon <= 2.0:
                     return lon, lat
         except Exception:
             continue
-
     return None, None
 
 
 def calcular_km(origen, destino, api_key):
-    """Calcula km por carretera entre dos puntos (lon, lat) usando OpenRouteService."""
     url     = "https://api.openrouteservice.org/v2/directions/driving-car"
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
     body    = {"coordinates": [list(origen), list(destino)]}
@@ -147,13 +161,9 @@ def calcular_km(origen, destino, api_key):
 
 def guardar_en_sheets(filas):
     try:
-        scope      = ["https://spreadsheets.google.com/feeds",
-                      "https://www.googleapis.com/auth/drive"]
-        creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-        creds      = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client     = gspread.authorize(creds)
-        sheet      = client.open(GOOGLE_SHEETS_NAME).sheet1
-
+        creds  = get_google_creds()
+        client = gspread.authorize(creds)
+        sheet  = client.open(GOOGLE_SHEETS_NAME).sheet1
         if not sheet.get_all_values():
             sheet.append_row([
                 "FECHA", "CODIGO", "DNI", "NOMBRE",
