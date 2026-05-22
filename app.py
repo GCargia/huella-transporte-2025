@@ -642,7 +642,7 @@ def main():
                         restante = 100 - sum(st.session_state[key_pcts][:-1])
                         restante = max(1, restante)
                         st.session_state[key_pcts][i] = restante
-                        st.markdown(f"**{T['pct_uso']}: {restante}%** *(auto)*")
+                        st.markdown(f"**{T['pct_uso']}: {restante}%** *({'Kalkulu automatikoa' if idioma == 'eu' else 'Cálculo automático'})*")
                         pct_modo = restante
                     else:
                         pct_modo = st.number_input(
@@ -692,6 +692,11 @@ def main():
             if st.button(T["anadir_modo"], key=f"add_{centro}"):
                 st.session_state[key_n] = n_modos + 1
                 st.rerun()
+
+        # Validar que suman 100%
+        if n_modos > 1 and modos_centro and round(pct_total) != 100:
+            st.warning(T["error_pct"])
+            todo_completado = False
 
         modos_por_centro[centro] = modos_centro
         st.markdown("---")
