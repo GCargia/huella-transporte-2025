@@ -608,23 +608,63 @@ def main():
         for i in range(n_modos):
             st.markdown(f'<div class="modo-box">', unsafe_allow_html=True)
 
-            # Columnas adaptadas según si hay combustible o no
-            if n_modos > 1:
-                cols = st.columns([3, 2, 2, 1])
-            else:
-                cols = st.columns([3, 3, 2])
-
-            with cols[0]:
-                modo = st.selectbox(
-                    f"{T['modo_label']} {i+1}",
-                    options=[T["selecciona"]] + TODOS_MODOS,
-                    format_func=lambda x: T["modos_display"].get(x, x) if x != T["selecciona"] else x,
-                    key=f"modo_{centro}_{i}"
-                )
+            # Fila 1: modo de transporte
+            modo = st.selectbox(
+                f"{T['modo_label']} {i+1}",
+                options=[T["selecciona"]] + TODOS_MODOS,
+                format_func=lambda x: T["modos_display"].get(x, x) if x != T["selecciona"] else x,
+                key=f"modo_{centro}_{i}"
+            )
 
             combustible = "—"
-            if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
-                with cols[1]:
+            # Fila 2: combustible (solo si aplica) y % de uso en la misma fila
+            if n_modos > 1:
+                if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
+                    col_comb, col_pct, col_del = st.columns([3, 2, 1])
+                    with col_comb:
+                        combustible = st.selectbox(
+                            T["combustible_label"],
+                            options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
+                            format_func=lambda x: COMBUSTIBLE_DISPLAY[idioma].get(x, x) if x != T["selecciona"] else x,
+                            key=f"comb_{centro}_{i}"
+                        )
+                        if combustible == T["selecciona"]:
+                            combustible = "—"
+                else:
+                    col_pct, col_del = st.columns([4, 1])
+
+                with col_pct:
+                    with st.expander("ℹ️"):
+                        st.caption(T["pct_tooltip"])
+                    pct_actual = st.session_state[key_pcts][i]
+                    # El último modo no es editable, es el restante automático
+                    if i == n_modos - 1:
+                        restante = 100 - sum(st.session_state[key_pcts][:-1])
+                        restante = max(1, restante)
+                        st.session_state[key_pcts][i] = restante
+                        st.markdown(f"**{T['pct_uso']}: {restante}%** *(auto)*")
+                        pct_modo = restante
+                    else:
+                        pct_modo = st.number_input(
+                            T["pct_uso"],
+                            min_value=1,
+                            max_value=99 - sum(st.session_state[key_pcts][i+1:-1]) if n_modos > 2 else 99,
+                            value=min(pct_actual, 99),
+                            key=f"pct_{centro}_{i}",
+                        )
+                        if pct_modo != st.session_state[key_pcts][i]:
+                            st.session_state[key_pcts][i] = pct_modo
+                            st.rerun()
+
+                with col_del:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if i > 0 and st.button(T["eliminar_modo"], key=f"del_{centro}_{i}"):
+                        st.session_state[key_n] = n_modos - 1
+                        del st.session_state[key_pcts]
+                        st.rerun()
+            else:
+                # Modo único: mostrar combustible si aplica, sin % ni botón eliminar
+                if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
                     combustible = st.selectbox(
                         T["combustible_label"],
                         options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
@@ -633,37 +673,7 @@ def main():
                     )
                     if combustible == T["selecciona"]:
                         combustible = "—"
-
-            pct_modo = 100
-            if n_modos > 1:
-                pct_col = cols[2]
-                with pct_col:
-                    with st.expander("ℹ️"):
-                        st.caption(T["pct_tooltip"])
-                    pct_actual = st.session_state[key_pcts][i]
-                    pct_modo = st.number_input(
-                        T["pct_uso"],
-                        min_value=1, max_value=99,
-                        value=pct_actual,
-                        key=f"pct_{centro}_{i}",
-                    )
-                    if pct_modo != st.session_state[key_pcts][i]:
-                        st.session_state[key_pcts][i] = pct_modo
-                        restante = 100 - pct_modo
-                        otros = [j for j in range(n_modos) if j != i]
-                        if otros:
-                            base = restante // len(otros)
-                            resto = restante - base * len(otros)
-                            for j, idx in enumerate(otros):
-                                st.session_state[key_pcts][idx] = base + (1 if j == 0 else 0) * resto
-                        st.rerun()
-
-                with cols[3]:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if i > 0 and st.button(T["eliminar_modo"], key=f"del_{centro}_{i}"):
-                        st.session_state[key_n] = n_modos - 1
-                        del st.session_state[key_pcts]
-                        st.rerun()
+                pct_modo = 100
 
             st.markdown('</div>', unsafe_allow_html=True)
 
