@@ -453,9 +453,11 @@ def main():
     if "idioma" not in st.session_state:
         st.session_state["idioma"] = None
 
+    # Cargar logo una sola vez
+    logo_b64 = get_logo_base64(LOGO_PATH)
+
     if st.session_state["idioma"] is None:
         # Pantalla de selección de idioma
-        logo_b64 = get_logo_base64(LOGO_PATH)
         if logo_b64:
             st.markdown(f"""
             <div style="text-align:center; padding: 2rem 0 1rem 0;">
@@ -506,7 +508,6 @@ def main():
             st.rerun()
 
     # ── HEADER CON LOGO ───────────────────────
-    logo_b64 = get_logo_base64(LOGO_PATH)
     col_txt, col_logo = st.columns([3, 1])
     with col_txt:
         st.markdown(f"""
