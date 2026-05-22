@@ -636,7 +636,7 @@ def main():
                     errores.append(centro)
                     continue
 
-                km_anuales   = round(km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025) * pct_jornada, 2)
+                km_anuales = round(km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025) * pct_jornada * (imputacion / 100), 2)
                 modo_display = T["modos_display"].get(modo, modo)
                 comb_display = COMBUSTIBLE_DISPLAY[idioma].get(combustible, combustible)
 
