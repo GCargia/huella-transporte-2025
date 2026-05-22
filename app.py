@@ -693,11 +693,6 @@ def main():
                 st.session_state[key_n] = n_modos + 1
                 st.rerun()
 
-        # Validar que suman 100%
-        if n_modos > 1 and modos_centro and round(pct_total) != 100:
-            st.warning(T["error_pct"])
-            todo_completado = False
-
         modos_por_centro[centro] = modos_centro
         st.markdown("---")
 
