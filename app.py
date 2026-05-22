@@ -70,6 +70,7 @@ TEXTOS = {
         "modo_label": "Garraio modua",
         "combustible_label": "Erregai mota",
         "pct_uso": "Erabilera %",
+        "pct_tooltip": "Erabileraren estimazioa: normalean autoz joaten bazara baina noizean behin garraio publikoa erabiltzen baduzu, %80 autoa eta %20 garraio publikoa jar dezakezu. Ez da beharrezkoa zehatza izatea; hurbilketa bat nahikoa da.",
         "anadir_modo": "➕ Beste garraio mota bat gehitu",
         "eliminar_modo": "✕ Kendu",
         "error_pct": "⚠️ Garraio moduen portzentajeen batura 100% izan behar da.",
@@ -125,6 +126,7 @@ TEXTOS = {
         "modo_label": "Modo de transporte",
         "combustible_label": "Tipo de combustible",
         "pct_uso": "% de uso",
+        "pct_tooltip": "Estimación del uso: si habitualmente vas en coche pero ocasionalmente usas el transporte público, puedes poner 80% coche y 20% transporte público. No hace falta que sea exacto, una aproximación es suficiente.",
         "anadir_modo": "➕ Añadir otro modo de transporte",
         "eliminar_modo": "✕ Eliminar",
         "error_pct": "⚠️ Los porcentajes de los modos de transporte deben sumar 100%.",
@@ -591,6 +593,14 @@ def main():
         modos_centro = []
         pct_total = 0
 
+        # Inicializar porcentajes en session_state
+        key_pcts = f"pcts_{centro}"
+        if key_pcts not in st.session_state or len(st.session_state[key_pcts]) != n_modos:
+            # Repartir 100% equitativamente al cambiar número de modos
+            base = 100 // n_modos
+            resto = 100 - base * n_modos
+            st.session_state[key_pcts] = [base + (1 if i == 0 else 0) * resto for i in range(n_modos)]
+
         for i in range(n_modos):
             st.markdown(f'<div class="modo-box">', unsafe_allow_html=True)
             cols = st.columns([3, 2, 2, 1]) if n_modos > 1 else st.columns([3, 2, 3])
@@ -618,15 +628,35 @@ def main():
             pct_modo = 100
             if n_modos > 1:
                 with cols[2]:
+                    # Mostrar tooltip informativo
+                    with st.expander("ℹ️"):
+                        st.caption(T["pct_tooltip"])
+
+                    pct_actual = st.session_state[key_pcts][i]
                     pct_modo = st.number_input(
                         T["pct_uso"],
-                        min_value=1, max_value=99, value=50,
-                        key=f"pct_{centro}_{i}"
+                        min_value=1, max_value=99,
+                        value=pct_actual,
+                        key=f"pct_{centro}_{i}",
+                        on_change=None
                     )
+                    # Recalcular automáticamente el resto
+                    if pct_modo != st.session_state[key_pcts][i]:
+                        st.session_state[key_pcts][i] = pct_modo
+                        restante = 100 - pct_modo
+                        otros = [j for j in range(n_modos) if j != i]
+                        if otros:
+                            base = restante // len(otros)
+                            resto = restante - base * len(otros)
+                            for j, idx in enumerate(otros):
+                                st.session_state[key_pcts][idx] = base + (1 if j == 0 else 0) * resto
+                        st.rerun()
+
                 with cols[3]:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if i > 0 and st.button(T["eliminar_modo"], key=f"del_{centro}_{i}"):
                         st.session_state[key_n] = n_modos - 1
+                        del st.session_state[key_pcts]
                         st.rerun()
 
             st.markdown('</div>', unsafe_allow_html=True)
