@@ -582,7 +582,11 @@ def main():
         centro = cr["CENTRO"]
         pct    = cr["IMPUTACION_%"]
 
-        st.markdown(f"**🏢 {centro}** ({pct}% {T['denboraren']})")
+        if idioma == "eu":
+            pct_txt_centro = f"Denboraren %{pct}ean"
+        else:
+            pct_txt_centro = f"{pct}% {T['denboraren']}"
+        st.markdown(f"**🏢 {centro}** ({pct_txt_centro})")
 
         # Inicializar modos en session_state
         key_n = f"n_modos_{centro}"
@@ -603,7 +607,12 @@ def main():
 
         for i in range(n_modos):
             st.markdown(f'<div class="modo-box">', unsafe_allow_html=True)
-            cols = st.columns([3, 2, 2, 1]) if n_modos > 1 else st.columns([3, 2, 3])
+
+            # Columnas adaptadas según si hay combustible o no
+            if n_modos > 1:
+                cols = st.columns([3, 2, 2, 1])
+            else:
+                cols = st.columns([3, 3, 2])
 
             with cols[0]:
                 modo = st.selectbox(
@@ -627,20 +636,17 @@ def main():
 
             pct_modo = 100
             if n_modos > 1:
-                with cols[2]:
-                    # Mostrar tooltip informativo
+                pct_col = cols[2]
+                with pct_col:
                     with st.expander("ℹ️"):
                         st.caption(T["pct_tooltip"])
-
                     pct_actual = st.session_state[key_pcts][i]
                     pct_modo = st.number_input(
                         T["pct_uso"],
                         min_value=1, max_value=99,
                         value=pct_actual,
                         key=f"pct_{centro}_{i}",
-                        on_change=None
                     )
-                    # Recalcular automáticamente el resto
                     if pct_modo != st.session_state[key_pcts][i]:
                         st.session_state[key_pcts][i] = pct_modo
                         restante = 100 - pct_modo
@@ -765,7 +771,11 @@ def main():
             for r in resultados:
                 if r["centro"] != centro_actual:
                     centro_actual = r["centro"]
-                    st.markdown(f"**🏢 {r['centro']}**")
+                    if idioma == "eu":
+                        pct_label = f"Denboraren %{r['imputacion']}ean"
+                    else:
+                        pct_label = f"{r['imputacion']}% {T['denboraren']}"
+                    st.markdown(f"**🏢 {r['centro']}** ({pct_label})")
                 comb_txt = f" — {r['comb_display']}" if r['combustible'] not in ["—",""] else ""
                 pct_txt  = f" ({r['pct_modo']}%)" if r["pct_modo"] < 100 else ""
                 st.markdown(f"""
