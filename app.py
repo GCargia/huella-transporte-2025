@@ -303,10 +303,10 @@ def actualizar_sheet_calculos(client, resultados):
                 title="CALCULOS", rows=100, cols=20)
 
         modos_cols = [
-            "Autoa - Gasolina","Autoa - Diesela","Autoa - Elektrikoa","Autoa - Hibridoa",
-            "Furgoneta - Gasolina","Furgoneta - Diesela","Furgoneta - Elektrikoa","Furgoneta - Hibridoa",
-            "Motozikleta - Gasolina","Motozikleta - Diesela","Motozikleta - Elektrikoa","Motozikleta - Hibridoa",
-            "Garraio publikoa","Oinez edo bizikletaz","TOTAL"
+            "Coche - Gasolina","Coche - Diésel","Coche - Eléctrico","Coche - Híbrido",
+            "Furgoneta - Gasolina","Furgoneta - Diésel","Furgoneta - Eléctrico","Furgoneta - Híbrido",
+            "Moto - Gasolina","Moto - Diésel","Moto - Eléctrico","Moto - Híbrido",
+            "Transporte público","A pie o en bicicleta","TOTAL"
         ]
         cabecera = ["CENTRO"] + modos_cols
 
@@ -341,8 +341,8 @@ def actualizar_sheet_calculos(client, resultados):
                 centros_idx = {row[0]: i + 2 for i, row in enumerate(data[1:])}
 
             fila_idx = centros_idx[centro]
-            val_actual   = float(str(sheet_calc.cell(fila_idx, col_idx).value or 0).replace(",", "."))
-            val_total    = float(str(sheet_calc.cell(fila_idx, col_total).value or 0).replace(",", "."))
+            val_actual   = float(sheet_calc.cell(fila_idx, col_idx).value or 0)
+            val_total    = float(sheet_calc.cell(fila_idx, col_total).value or 0)
             sheet_calc.update_cell(fila_idx, col_idx,   round(val_actual + km_anuales, 2))
             sheet_calc.update_cell(fila_idx, col_total, round(val_total  + km_anuales, 2))
 
@@ -636,14 +636,17 @@ def main():
                     errores.append(centro)
                     continue
 
-                km_anuales = round(km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025) * pct_jornada * (imputacion / 100), 2)
+                km_anuales   = round(km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025) * pct_jornada, 2)
                 modo_display = T["modos_display"].get(modo, modo)
                 comb_display = COMBUSTIBLE_DISPLAY[idioma].get(combustible, combustible)
+                # Versión en español para la hoja CALCULOS
+                modo_es = TEXTOS["es"]["modos_display"].get(modo, modo)
+                comb_es = COMBUSTIBLE_DISPLAY["es"].get(combustible, combustible)
 
                 resultados.append({
                     "centro": centro, "imputacion": imputacion,
                     "km": km, "km_ida_vuelta_anuales": km_anuales,
-                    "modo": modo, "combustible": combustible,
+                    "modo": modo_es, "combustible": comb_es,
                     "modo_display": modo_display, "comb_display": comb_display,
                 })
 
