@@ -14,15 +14,18 @@ from googleapiclient.http import MediaIoBaseDownload
 # ─────────────────────────────────────────────
 # CONFIGURACIÓN
 # ─────────────────────────────────────────────
-DRIVE_FILE_ID        = "1vW-2w-KTfAkOd-QrDOg-Tg40MSjMDdpr"
+DRIVE_FILE_ID_TRAB   = "1vW-2w-KTfAkOd-QrDOg-Tg40MSjMDdpr"
+DRIVE_FILE_ID_DIAS   = "13rMzp0j4I_OpZAqt5gc_gJ5Do8bjEY49"
 FICHERO_CENTROS      = "DIRECCIONES_CENTROS.xlsx"
 LOGO_PATH            = "LOGO_ARGIA_2026.png"
 ORS_API_KEY          = st.secrets.get("ORS_API_KEY", "")
 GOOGLE_SHEETS_NAME   = st.secrets.get("GOOGLE_SHEETS_NAME", "HuellaCarbonoTransporte2025")
+DIAS_BASE            = 360
+DIAS_LABORABLES_2025 = 226
 
-VEHICULOS_CON_COMBUSTIBLE = ["Coche", "Furgoneta", "Moto"]
-TIPOS_COMBUSTIBLE         = ["Gasolina", "Diésel", "Eléctrico", "Híbrido"]
-MODOS_SIN_COMBUSTIBLE     = ["Transporte público (bus / metro / tren)", "A pie o en bicicleta"]
+VEHICULOS_CON_COMBUSTIBLE = ["Coche", "Furgoneta", "Motozikleta"]
+TIPOS_COMBUSTIBLE         = ["Gasolina", "Diesela", "Elektrikoa", "Hibridoa"]
+MODOS_SIN_COMBUSTIBLE     = ["Garraio publikoa (autobusa / metroa / trena)", "Oinez edo bizikletaz"]
 TODOS_MODOS               = VEHICULOS_CON_COMBUSTIBLE + MODOS_SIN_COMBUSTIBLE
 
 COLOR_TURQUESA = "#7BC4C4"
@@ -33,15 +36,127 @@ COLOR_FONDO    = "#F9F9F9"
 COLOR_BLANCO   = "#FFFFFF"
 
 # ─────────────────────────────────────────────
-# UTILIDADES
+# TEXTOS BILINGÜES
 # ─────────────────────────────────────────────
-def get_logo_base64(path):
-    try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except Exception:
-        return None
+TEXTOS = {
+    "eu": {
+        "titulo": "Karbono Aztarna 2025",
+        "subtitulo": "Lanerako joan-etorrien erregistroa",
+        "aviso_titulo": "Datuen babesa",
+        "aviso_texto": "Sartutako datuak Argia Fundazioa 2025en karbono-aztarna kalkulatzeko soilik erabiliko dira, DBEO betez. Baimendutako langileek bakarrik dute informazio hori eskuratzeko aukera.",
+        "identificacion": "🔐 Identifikazioa",
+        "codigo": "Langilearen kodea (4 digitu)",
+        "dni": "NAN",
+        "error_credenciales": "❌ Kodea edo NANa ez da zuzena. Mesedez, egiaztatu datuak.",
+        "error_codigo": "❌ Kodea numerikoa izan behar da.",
+        "bienvenido": "✅ Ongi etorri,",
+        "tus_datos": "👤 Zure datuak",
+        "domicilio_registrado": "📍 Helbidea erregistratu da:",
+        "centros_trabajo": "2025eko lan zentroak:",
+        "domicilio_habitual": "🏠 Ohiko bizilekua",
+        "domicilio_correcto": "Zure ohiko bizilekua zuzena da?",
+        "si_correcto": "Bai, zuzena da",
+        "no_correcto": "Ez, zuzendu nahi dut",
+        "introduce_domicilio": "Sartu zure egungo ohiko helbidea:",
+        "calle": "Kalea eta zenbakia",
+        "municipio": "Udalerria",
+        "cp": "Posta kodea",
+        "aviso_domicilio": "Bete helbidearen eremu guztiak, mesedez.",
+        "modo_transporte": "🚗 Garraio modua",
+        "modo_caption": "Adierazi nola joaten zaren ohikoki lan zentro bakoitzera.",
+        "selecciona": "— Hautatu —",
+        "modo_label": "Garraio modua —",
+        "combustible_label": "Erregai mota —",
+        "calculo": "📏 Distantzien kalkulua",
+        "boton_calcular": "✅ Distantziak kalkulatu eta baieztatu",
+        "error_ors": "⚠️ OpenRouteService gakoa ez dago konfiguratuta.",
+        "error_geolocalizacion": "❌ Ezin izan da zure helbidea geolokalizatu. Hautatu 'Ez, zuzendu nahi dut' eta sartu helbidea formatu honetan: Kalea Zenbakia, Udalerria, Posta kodea.",
+        "distancias_calculadas": "Kalkulatutako distantziak:",
+        "distancia_ida": "Joaneko distantzia:",
+        "error_centro": "⚠️ Ezin izan da distantzia kalkulatu:",
+        "gracias": "✅ Eskerrik asko! Zure datuak behar bezala erregistratu dira.",
+        "error_sheets": "⚠️ Datuak kalkulatu dira baina ezin izan dira gorde. Jarri harremanetan administratzailearekin.",
+        "error_distancias": "❌ Ezin izan dira distantziak kalkulatu. Saiatu berriro.",
+        "denboraren": "denboraren",
+        "idioma": "🌐 Hizkuntza",
+        "spinner": "Distantziak kalkulatzen...",
+        "modos_display": {
+            "Coche": "Autoa",
+            "Furgoneta": "Furgoneta",
+            "Motozikleta": "Motozikleta",
+            "Garraio publikoa (autobusa / metroa / trena)": "Garraio publikoa",
+            "Oinez edo bizikletaz": "Oinez edo bizikletaz",
+        }
+    },
+    "es": {
+        "titulo": "Huella de Carbono 2025",
+        "subtitulo": "Registro de desplazamientos al trabajo",
+        "aviso_titulo": "Protección de datos",
+        "aviso_texto": "Los datos introducidos se utilizarán exclusivamente para el cálculo de la huella de carbono de Argia Fundazioa 2025, en cumplimiento del RGPD. Solo el personal autorizado tiene acceso a esta información.",
+        "identificacion": "🔐 Identificación",
+        "codigo": "Código de trabajador/a (4 dígitos)",
+        "dni": "DNI",
+        "error_credenciales": "❌ Código o DNI incorrecto. Por favor comprueba los datos.",
+        "error_codigo": "❌ El código debe ser numérico.",
+        "bienvenido": "✅ Bienvenida/o,",
+        "tus_datos": "👤 Tus datos",
+        "domicilio_registrado": "📍 Domicilio registrado:",
+        "centros_trabajo": "Centros de trabajo en 2025:",
+        "domicilio_habitual": "🏠 Domicilio habitual",
+        "domicilio_correcto": "¿Tu domicilio habitual es correcto?",
+        "si_correcto": "Sí, es correcto",
+        "no_correcto": "No, quiero corregirlo",
+        "introduce_domicilio": "Introduce tu domicilio habitual actual:",
+        "calle": "Calle y número",
+        "municipio": "Municipio",
+        "cp": "Código postal",
+        "aviso_domicilio": "Por favor completa todos los campos del domicilio.",
+        "modo_transporte": "🚗 Modo de transporte",
+        "modo_caption": "Indica cómo te desplazas habitualmente a cada centro de trabajo.",
+        "selecciona": "— Selecciona —",
+        "modo_label": "Modo de transporte —",
+        "combustible_label": "Tipo de combustible —",
+        "calculo": "📏 Cálculo de distancias",
+        "boton_calcular": "✅ Calcular distancias y confirmar",
+        "error_ors": "⚠️ No se ha configurado la clave de OpenRouteService.",
+        "error_geolocalizacion": "❌ No se ha podido geolocalizar tu domicilio. Selecciona 'No, quiero corregirlo' e introduce la dirección en formato: Calle Mayor 5, Bilbao, 48001.",
+        "distancias_calculadas": "Distancias calculadas:",
+        "distancia_ida": "Distancia de ida:",
+        "error_centro": "⚠️ No se pudo calcular la distancia para:",
+        "gracias": "✅ ¡Gracias! Tus datos han sido registrados correctamente.",
+        "error_sheets": "⚠️ Los datos se han calculado pero no se han podido guardar. Contacta con el administrador.",
+        "error_distancias": "❌ No se han podido calcular las distancias. Inténtalo de nuevo.",
+        "denboraren": "del tiempo",
+        "idioma": "🌐 Idioma",
+        "spinner": "Calculando distancias...",
+        "modos_display": {
+            "Coche": "Coche",
+            "Furgoneta": "Furgoneta",
+            "Motozikleta": "Moto",
+            "Garraio publikoa (autobusa / metroa / trena)": "Transporte público",
+            "Oinez edo bizikletaz": "A pie o en bicicleta",
+        }
+    }
+}
 
+COMBUSTIBLE_DISPLAY = {
+    "eu": {
+        "Gasolina": "Gasolina",
+        "Diesela": "Diesela",
+        "Elektrikoa": "Elektrikoa",
+        "Hibridoa": "Hibridoa",
+    },
+    "es": {
+        "Gasolina": "Gasolina",
+        "Diesela": "Diésel",
+        "Elektrikoa": "Eléctrico",
+        "Hibridoa": "Híbrido",
+    }
+}
+
+# ─────────────────────────────────────────────
+# CARGA DE DATOS
+# ─────────────────────────────────────────────
 def get_google_creds():
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -50,36 +165,45 @@ def get_google_creds():
     creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
     return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 
-@st.cache_data(ttl=0)
-def cargar_datos():
-    # ── Descargar XLS desde Google Drive ──
+def descargar_desde_drive(file_id):
     creds   = get_google_creds()
     service = build("drive", "v3", credentials=creds)
-    request = service.files().get_media(fileId=DRIVE_FILE_ID)
-
-    buffer = io.BytesIO()
+    request = service.files().get_media(fileId=file_id)
+    buffer  = io.BytesIO()
     downloader = MediaIoBaseDownload(buffer, request)
     done = False
     while not done:
         _, done = downloader.next_chunk()
     buffer.seek(0)
+    return buffer
 
-    df_trab = pd.read_excel(buffer, sheet_name="TRABAJADORES")
-    buffer.seek(0)
-    df_imp  = pd.read_excel(buffer, sheet_name="IMPUTACIONES")
+@st.cache_data(ttl=0)
+def cargar_datos():
+    # Trabajadores e imputaciones desde Drive
+    buf_trab = descargar_desde_drive(DRIVE_FILE_ID_TRAB)
+    df_trab  = pd.read_excel(buf_trab, sheet_name="TRABAJADORES")
+    buf_trab.seek(0)
+    df_imp   = pd.read_excel(buf_trab, sheet_name="IMPUTACIONES")
 
-    # ── Cargar centros desde fichero local ──
-    df_cent = pd.read_excel(FICHERO_CENTROS)
+    # Días trabajados desde Drive
+    buf_dias = descargar_desde_drive(DRIVE_FILE_ID_DIAS)
+    df_dias  = pd.read_excel(buf_dias)
 
-    df_trab.columns = df_trab.columns.str.strip()
-    df_imp.columns  = df_imp.columns.str.strip()
-    df_cent.columns = df_cent.columns.str.strip()
+    # Centros desde fichero local
+    df_cent  = pd.read_excel(FICHERO_CENTROS)
+
+    # Limpiar columnas
+    for df in [df_trab, df_imp, df_dias, df_cent]:
+        df.columns = df.columns.str.strip()
 
     df_trab["CODIGO"] = df_trab["CODIGO"].astype(int).apply(lambda x: str(x).zfill(4))
     df_imp["CODIGO"]  = df_imp["CODIGO"].astype(int).apply(lambda x: str(x).zfill(4))
+    df_dias["CODIGO"] = df_dias["CODIGO"].astype(int).apply(lambda x: str(x).zfill(4))
     df_trab["DNI"]    = df_trab["DNI"].astype(str).str.strip().str.upper()
     df_imp["CENTRO"]  = df_imp["CENTRO"].astype(str).str.strip()
     df_imp["IMPUTACION"] = pd.to_numeric(df_imp["IMPUTACION"], errors="coerce")
+    df_dias["Nº DÍAS"]   = pd.to_numeric(df_dias["Nº DÍAS"], errors="coerce")
+    df_dias["% JORNADA"] = pd.to_numeric(df_dias["% JORNADA"], errors="coerce")
 
     def parsear_coords(val):
         try:
@@ -90,26 +214,20 @@ def cargar_datos():
 
     df_cent["LAT"], df_cent["LON"] = zip(*df_cent["COORDENADAS"].apply(parsear_coords))
 
-    return df_trab, df_imp, df_cent
+    return df_trab, df_imp, df_cent, df_dias
 
 
+# ─────────────────────────────────────────────
+# GEOCODIFICACIÓN Y RUTAS
+# ─────────────────────────────────────────────
 def limpiar_direccion(direccion):
     reemplazos = [
-        (r"^CL\b",   "Calle"),
-        (r"^C/\b",   "Calle"),
-        (r"^C\b",    "Calle"),
-        (r"^AV\b",   "Avenida"),
-        (r"^AVD\b",  "Avenida"),
-        (r"^AVDA\b", "Avenida"),
-        (r"^PZ\b",   "Plaza"),
-        (r"^PL\b",   "Plaza"),
-        (r"^PS\b",   "Paseo"),
-        (r"^PSO\b",  "Paseo"),
-        (r"^BO\b",   "Barrio"),
-        (r"^Bº\b",   "Barrio"),
-        (r"^URB\b",  "Urbanización"),
-        (r"^CTRA\b", "Carretera"),
-        (r"^CR\b",   "Carretera"),
+        (r"^CL\b",   "Calle"), (r"^C/\b",   "Calle"), (r"^C\b",    "Calle"),
+        (r"^AV\b",   "Avenida"), (r"^AVD\b",  "Avenida"), (r"^AVDA\b", "Avenida"),
+        (r"^PZ\b",   "Plaza"), (r"^PL\b",   "Plaza"),
+        (r"^PS\b",   "Paseo"), (r"^PSO\b",  "Paseo"),
+        (r"^BO\b",   "Barrio"), (r"^Bº\b",   "Barrio"),
+        (r"^URB\b",  "Urbanización"), (r"^CTRA\b", "Carretera"), (r"^CR\b", "Carretera"),
     ]
     d = direccion.strip()
     for patron, reemplazo in reemplazos:
@@ -130,10 +248,11 @@ def geocodificar_nominatim(domicilio, municipio, cp):
     headers = {"User-Agent": "ArgiaCarbonApp/1.0"}
     for intento in intentos:
         try:
-            url    = "https://nominatim.openstreetmap.org/search"
-            params = {"q": intento, "format": "json", "limit": 1, "countrycodes": "es"}
-            r      = requests.get(url, params=params, headers=headers, timeout=10)
-            data   = r.json()
+            r    = requests.get("https://nominatim.openstreetmap.org/search",
+                                params={"q": intento, "format": "json",
+                                        "limit": 1, "countrycodes": "es"},
+                                headers=headers, timeout=10)
+            data = r.json()
             if data:
                 lat = float(data[0]["lat"])
                 lon = float(data[0]["lon"])
@@ -157,6 +276,9 @@ def calcular_km(origen, destino, api_key):
         return None
 
 
+# ─────────────────────────────────────────────
+# GOOGLE SHEETS
+# ─────────────────────────────────────────────
 def guardar_en_sheets(filas):
     try:
         creds  = get_google_creds()
@@ -167,7 +289,8 @@ def guardar_en_sheets(filas):
                 "FECHA", "CODIGO", "DNI", "NOMBRE",
                 "DOMICILIO_USADO", "MUNICIPIO", "CP",
                 "CENTRO", "IMPUTACION_%", "KM_IDA",
-                "MODO_TRANSPORTE", "COMBUSTIBLE", "DOMICILIO_CORREGIDO"
+                "KM_IDA_VUELTA_ANUALES", "MODO_TRANSPORTE",
+                "COMBUSTIBLE", "DOMICILIO_CORREGIDO"
             ])
         for fila in filas:
             sheet.append_row(fila)
@@ -177,8 +300,81 @@ def guardar_en_sheets(filas):
         return False
 
 
+def actualizar_sheet_calculos(client, resultados_trabajador, nombre, codigo):
+    """Actualiza o crea la hoja de cálculos agregados por centro y modo."""
+    try:
+        try:
+            sheet_calc = client.open(GOOGLE_SHEETS_NAME).worksheet("CALCULOS")
+        except Exception:
+            sheet_calc = client.open(GOOGLE_SHEETS_NAME).add_worksheet(
+                title="CALCULOS", rows=100, cols=20)
+
+        # Leer datos existentes
+        data = sheet_calc.get_all_values()
+
+        # Definir cabeceras
+        modos_cols = [
+            "Autoa - Gasolina", "Autoa - Diesela", "Autoa - Elektrikoa", "Autoa - Hibridoa",
+            "Furgoneta - Gasolina", "Furgoneta - Diesela", "Furgoneta - Elektrikoa", "Furgoneta - Hibridoa",
+            "Motozikleta - Gasolina", "Motozikleta - Diesela", "Motozikleta - Elektrikoa", "Motozikleta - Hibridoa",
+            "Garraio publikoa", "Oinez edo bizikletaz", "TOTAL"
+        ]
+        cabecera = ["CENTRO"] + modos_cols
+
+        if not data or data[0] != cabecera:
+            sheet_calc.clear()
+            sheet_calc.append_row(cabecera)
+            data = [cabecera]
+
+        # Obtener centros existentes
+        centros_existentes = {row[0]: i+1 for i, row in enumerate(data[1:], start=1)}
+
+        for r in resultados_trabajador:
+            centro      = r["centro"]
+            km_anuales  = r["km_ida_vuelta_anuales"]
+            modo        = r["modo"]
+            combustible = r["combustible"]
+
+            # Determinar columna
+            if combustible and combustible not in ["—", ""]:
+                col_key = f"{modo} - {combustible}"
+            else:
+                col_key = modo
+
+            if col_key not in modos_cols:
+                col_key = "TOTAL"
+
+            col_idx = modos_cols.index(col_key) + 2  # +2 por columna CENTRO y base 1
+
+            if centro not in centros_existentes:
+                # Añadir fila nueva para este centro
+                nueva_fila = [centro] + [0] * len(modos_cols)
+                sheet_calc.append_row(nueva_fila)
+                fila_idx = len(data) + 1
+                centros_existentes[centro] = fila_idx
+                data.append(nueva_fila)
+            else:
+                fila_idx = centros_existentes[centro]
+
+            # Sumar km al valor existente
+            celda = sheet_calc.cell(fila_idx + 1, col_idx)
+            valor_actual = float(celda.value or 0)
+            sheet_calc.update_cell(fila_idx + 1, col_idx, round(valor_actual + km_anuales, 2))
+
+            # Actualizar TOTAL
+            col_total = len(modos_cols) + 1
+            celda_total = sheet_calc.cell(fila_idx + 1, col_total)
+            total_actual = float(celda_total.value or 0)
+            sheet_calc.update_cell(fila_idx + 1, col_total, round(total_actual + km_anuales, 2))
+
+        return True
+    except Exception as e:
+        st.warning(f"No se pudo actualizar la hoja de cálculos: {e}")
+        return False
+
+
 # ─────────────────────────────────────────────
-# CSS CORPORATIVO
+# CSS
 # ─────────────────────────────────────────────
 def inyectar_css():
     st.markdown(f"""
@@ -188,65 +384,55 @@ def inyectar_css():
     .info-box {{
         background: {COLOR_BLANCO};
         border-left: 5px solid {COLOR_TURQUESA};
-        padding: 0.8rem 1rem;
-        border-radius: 6px;
-        margin-bottom: 0.8rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        padding: 0.8rem 1rem; border-radius: 6px;
+        margin-bottom: 0.8rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }}
     .aviso {{
-        background: #FFF8E1;
-        border-left: 5px solid #FFD54F;
-        padding: 0.8rem 1rem;
-        border-radius: 6px;
-        font-size: 0.88rem;
-        color: #6D5000;
-        margin-bottom: 1rem;
+        background: #FFF8E1; border-left: 5px solid #FFD54F;
+        padding: 0.8rem 1rem; border-radius: 6px;
+        font-size: 0.88rem; color: #6D5000; margin-bottom: 1rem;
     }}
     .exito {{
-        background: #E8F5E9;
-        border-left: 5px solid {COLOR_VERDE};
-        padding: 0.8rem 1rem;
-        border-radius: 6px;
-        margin-bottom: 0.8rem;
+        background: #E8F5E9; border-left: 5px solid {COLOR_VERDE};
+        padding: 0.8rem 1rem; border-radius: 6px; margin-bottom: 0.8rem;
     }}
     .centro-tag {{
-        background: {COLOR_TURQUESA};
-        color: white;
-        padding: 4px 12px;
-        border-radius: 14px;
-        font-size: 0.83rem;
-        display: inline-block;
-        margin: 3px;
-        font-weight: 500;
+        background: {COLOR_TURQUESA}; color: white;
+        padding: 4px 12px; border-radius: 14px;
+        font-size: 0.83rem; display: inline-block; margin: 3px; font-weight: 500;
     }}
     .seccion-titulo {{
-        font-size: 1.05rem;
-        font-weight: bold;
-        color: {COLOR_GRIS};
+        font-size: 1.05rem; font-weight: bold; color: {COLOR_GRIS};
         border-bottom: 2px solid {COLOR_ROSA};
-        padding-bottom: 4px;
-        margin-top: 1.5rem;
-        margin-bottom: 0.8rem;
+        padding-bottom: 4px; margin-top: 1.5rem; margin-bottom: 0.8rem;
     }}
     .km-box {{
-        background: {COLOR_BLANCO};
-        border: 1px solid {COLOR_VERDE};
-        border-left: 5px solid {COLOR_VERDE};
-        padding: 0.8rem 1rem;
-        border-radius: 6px;
-        margin-bottom: 0.6rem;
+        background: {COLOR_BLANCO}; border: 1px solid {COLOR_VERDE};
+        border-left: 5px solid {COLOR_VERDE}; padding: 0.8rem 1rem;
+        border-radius: 6px; margin-bottom: 0.6rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }}
     .stButton > button {{
-        background-color: {COLOR_TURQUESA} !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: bold !important;
-        padding: 0.6rem 1.2rem !important;
+        background-color: {COLOR_TURQUESA} !important; color: white !important;
+        border: none !important; border-radius: 8px !important;
+        font-weight: bold !important; padding: 0.6rem 1.2rem !important;
     }}
-    .stButton > button:hover {{
-        background-color: {COLOR_VERDE} !important;
+    .stButton > button:hover {{ background-color: {COLOR_VERDE} !important; }}
+    .idioma-selector {{
+        position: fixed; top: 0.6rem; right: 1rem; z-index: 9999;
+        background: {COLOR_BLANCO}; border-radius: 8px;
+        padding: 4px 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+        font-size: 0.85rem;
+    }}
+    /* Modal idioma */
+    .modal-overlay {{
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    }}
+    .modal-box {{
+        background: white; border-radius: 16px; padding: 3rem 4rem;
+        text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -257,11 +443,67 @@ def inyectar_css():
 # ─────────────────────────────────────────────
 def main():
     st.set_page_config(
-        page_title="Huella de Carbono 2025 — Argia Fundazioa",
+        page_title="Karbono Aztarna 2025 — Argia Fundazioa",
         page_icon="🌱",
         layout="centered",
     )
     inyectar_css()
+
+    # ── SELECTOR DE IDIOMA INICIAL ────────────
+    if "idioma" not in st.session_state:
+        st.session_state["idioma"] = None
+
+    if st.session_state["idioma"] is None:
+        # Pantalla de selección de idioma
+        logo_b64 = get_logo_base64(LOGO_PATH)
+        if logo_b64:
+            st.markdown(f"""
+            <div style="text-align:center; padding: 2rem 0 1rem 0;">
+                <img src="data:image/png;base64,{logo_b64}"
+                     style="max-height:100px; max-width:280px;">
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("""
+            <div style="text-align:center; margin-bottom: 2rem;">
+                <p style="font-size:1.1rem; color:#6B6B6B; font-weight:500;">
+                    Hautatu hizkuntza / Selecciona idioma
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            col_eu, col_es = st.columns(2)
+            with col_eu:
+                if st.button("🇪🇺  Euskera", use_container_width=True, type="primary"):
+                    st.session_state["idioma"] = "eu"
+                    st.rerun()
+            with col_es:
+                if st.button("🇪🇸  Castellano", use_container_width=True):
+                    st.session_state["idioma"] = "es"
+                    st.rerun()
+        st.stop()
+
+    # ── IDIOMA ACTIVO ─────────────────────────
+    idioma = st.session_state["idioma"]
+    T      = TEXTOS[idioma]
+
+    # ── SELECTOR DE IDIOMA ARRIBA DERECHA ─────
+    col_h1, col_h2 = st.columns([4, 1])
+    with col_h2:
+        opciones_idioma = {"eu": "🇪🇺 Euskera", "es": "🇪🇸 Castellano"}
+        nuevo_idioma = st.selectbox(
+            T["idioma"],
+            options=list(opciones_idioma.keys()),
+            format_func=lambda x: opciones_idioma[x],
+            index=0 if idioma == "eu" else 1,
+            label_visibility="collapsed",
+            key="selector_idioma"
+        )
+        if nuevo_idioma != idioma:
+            st.session_state["idioma"] = nuevo_idioma
+            st.rerun()
 
     # ── HEADER CON LOGO ───────────────────────
     logo_b64 = get_logo_base64(LOGO_PATH)
@@ -270,9 +512,8 @@ def main():
         st.markdown(f"""
         <div>
             <p style="font-size:1.4rem;font-weight:bold;color:{COLOR_GRIS};margin:0;">
-                🌱 Huella de Carbono 2025</p>
-            <p style="font-size:0.9rem;color:#999;margin:0;">
-                Registro de desplazamientos al trabajo</p>
+                🌱 {T['titulo']}</p>
+            <p style="font-size:0.9rem;color:#999;margin:0;">{T['subtitulo']}</p>
         </div>
         """, unsafe_allow_html=True)
     with col_logo:
@@ -284,24 +525,23 @@ def main():
             </div>
             """, unsafe_allow_html=True)
 
-    st.markdown("""
+    st.markdown(f"""
     <div class="aviso">
-    ⚖️ <strong>Protección de datos:</strong> Los datos introducidos se utilizarán exclusivamente
-    para el cálculo de la huella de carbono de Argia Fundazioa 2025, en cumplimiento del RGPD.
-    Solo el personal autorizado tiene acceso a esta información.
+    ⚖️ <strong>{T['aviso_titulo']}:</strong> {T['aviso_texto']}
     </div>
     """, unsafe_allow_html=True)
 
-    df_trab, df_imp, df_cent = cargar_datos()
+    df_trab, df_imp, df_cent, df_dias = cargar_datos()
 
     # ── PASO 1: IDENTIFICACIÓN ────────────────
-    st.markdown('<div class="seccion-titulo">🔐 Identificación</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="seccion-titulo">{T["identificacion"]}</div>',
+                unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
-        codigo_input = st.text_input("Código de trabajador/a (4 dígitos)",
-                                     placeholder="Ej: 0129", max_chars=4).strip()
+        codigo_input = st.text_input(T["codigo"], placeholder="Ej: 0129",
+                                     max_chars=4).strip()
     with col2:
-        dni = st.text_input("DNI", placeholder="Ej: 72263087P").strip().upper()
+        dni = st.text_input(T["dni"], placeholder="Ej: 72263087P").strip().upper()
 
     if not codigo_input or not dni:
         st.stop()
@@ -309,39 +549,45 @@ def main():
     try:
         codigo = str(int(codigo_input)).zfill(4)
     except ValueError:
-        st.error("❌ El código debe ser numérico.")
+        st.error(T["error_codigo"])
         st.stop()
 
     trabajador = df_trab[(df_trab["CODIGO"] == codigo) & (df_trab["DNI"] == dni)]
     if trabajador.empty:
-        st.error("❌ Código o DNI incorrecto. Por favor comprueba los datos.")
+        st.error(T["error_credenciales"])
         st.stop()
 
     row    = trabajador.iloc[0]
     nombre = row["NOMBRE"]
 
+    # Obtener días trabajados y % jornada
+    dias_row     = df_dias[df_dias["CODIGO"] == codigo]
+    dias_trab    = float(dias_row.iloc[0]["Nº DÍAS"]) if not dias_row.empty else DIAS_BASE
+    pct_jornada  = float(dias_row.iloc[0]["% JORNADA"]) if not dias_row.empty else 1.0
+
     st.markdown(f"""
-    <div class="exito">✅ Bienvenida/o, <strong>{nombre}</strong></div>
+    <div class="exito">{T['bienvenido']} <strong>{nombre}</strong></div>
     """, unsafe_allow_html=True)
 
     # ── PASO 2: DATOS DEL TRABAJADOR ─────────
-    st.markdown('<div class="seccion-titulo">👤 Tus datos</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="seccion-titulo">{T["tus_datos"]}</div>',
+                unsafe_allow_html=True)
 
     domicilio_original = row["DIREC.TRABAJ"]
     municipio_original = row["POBLACION"]
-    cp_original        = str(int(row["COD. POSTAL TRAB."])) if pd.notna(row["COD. POSTAL TRAB."]) else ""
+    cp_original        = str(int(row["COD. POSTAL TRAB."])) if pd.notna(
+        row["COD. POSTAL TRAB."]) else ""
 
     st.markdown(f"""
     <div class="info-box">
-    📍 <strong>Domicilio registrado:</strong>
-    {domicilio_original}, {municipio_original} ({cp_original})
+    {T['domicilio_registrado']} {domicilio_original}, {municipio_original} ({cp_original})
     </div>
     """, unsafe_allow_html=True)
 
     centros_trab = df_imp[df_imp["CODIGO"] == codigo][["CENTRO", "IMPUTACION"]].copy()
     centros_trab["IMPUTACION_%"] = (centros_trab["IMPUTACION"] * 100).round(1)
 
-    st.markdown("**Centros de trabajo en 2025:**")
+    st.markdown(f"**{T['centros_trabajo']}**")
     tags = "".join([
         f'<span class="centro-tag">{r["CENTRO"]} ({r["IMPUTACION_%"]}%)</span>'
         for _, r in centros_trab.iterrows()
@@ -349,12 +595,12 @@ def main():
     st.markdown(tags + "<br><br>", unsafe_allow_html=True)
 
     # ── PASO 3: VERIFICAR DOMICILIO ───────────
-    st.markdown('<div class="seccion-titulo">🏠 Domicilio habitual</div>',
+    st.markdown(f'<div class="seccion-titulo">{T["domicilio_habitual"]}</div>',
                 unsafe_allow_html=True)
 
     domicilio_correcto = st.radio(
-        "¿Tu domicilio habitual es correcto?",
-        options=["Sí, es correcto", "No, quiero corregirlo"],
+        T["domicilio_correcto"],
+        options=[T["si_correcto"], T["no_correcto"]],
         index=0,
     )
 
@@ -363,26 +609,27 @@ def main():
     cp_final            = cp_original
     domicilio_corregido = False
 
-    if domicilio_correcto == "No, quiero corregirlo":
-        st.markdown("**Introduce tu domicilio habitual actual:**")
+    if domicilio_correcto == T["no_correcto"]:
+        st.markdown(f"**{T['introduce_domicilio']}**")
         col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
-            domicilio_final = st.text_input("Calle y número",
+            domicilio_final = st.text_input(T["calle"],
                                             placeholder="Ej: Calle Mayor 5 2A")
         with col2:
-            municipio_final = st.text_input("Municipio", placeholder="Ej: Bilbao")
+            municipio_final = st.text_input(T["municipio"],
+                                            placeholder="Ej: Bilbao")
         with col3:
-            cp_final = st.text_input("Código postal", placeholder="Ej: 48001")
+            cp_final = st.text_input(T["cp"], placeholder="Ej: 48001")
 
         if not domicilio_final or not municipio_final or not cp_final:
-            st.warning("Por favor completa todos los campos del domicilio.")
+            st.warning(T["aviso_domicilio"])
             st.stop()
         domicilio_corregido = True
 
     # ── PASO 4: MODO DE TRANSPORTE POR CENTRO ─
-    st.markdown('<div class="seccion-titulo">🚗 Modo de transporte</div>',
+    st.markdown(f'<div class="seccion-titulo">{T["modo_transporte"]}</div>',
                 unsafe_allow_html=True)
-    st.caption("Indica cómo te desplazas habitualmente a cada centro de trabajo.")
+    st.caption(T["modo_caption"])
 
     modos_por_centro       = {}
     combustible_por_centro = {}
@@ -392,15 +639,16 @@ def main():
         centro = centro_row["CENTRO"]
         pct    = centro_row["IMPUTACION_%"]
 
-        st.markdown(f"**🏢 {centro}** ({pct}% del tiempo)")
+        st.markdown(f"**🏢 {centro}** ({pct}% {T['denboraren']})")
 
         modo = st.selectbox(
-            f"Modo de transporte — {centro}",
-            options=["— Selecciona —"] + TODOS_MODOS,
+            f"{T['modo_label']} {centro}",
+            options=[T["selecciona"]] + TODOS_MODOS,
+            format_func=lambda x: T["modos_display"].get(x, x) if x != T["selecciona"] else x,
             key=f"modo_{centro}"
         )
 
-        if modo == "— Selecciona —":
+        if modo == T["selecciona"]:
             todo_completado = False
             modos_por_centro[centro]       = ""
             combustible_por_centro[centro] = ""
@@ -410,11 +658,12 @@ def main():
 
         if modo in VEHICULOS_CON_COMBUSTIBLE:
             combustible = st.selectbox(
-                f"Tipo de combustible — {centro}",
-                options=["— Selecciona —"] + TIPOS_COMBUSTIBLE,
+                f"{T['combustible_label']} {centro}",
+                options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
+                format_func=lambda x: COMBUSTIBLE_DISPLAY[idioma].get(x, x) if x != T["selecciona"] else x,
                 key=f"comb_{centro}"
             )
-            if combustible == "— Selecciona —":
+            if combustible == T["selecciona"]:
                 todo_completado = False
                 combustible_por_centro[centro] = ""
             else:
@@ -428,27 +677,21 @@ def main():
         st.stop()
 
     # ── PASO 5: CALCULAR KM ───────────────────
-    st.markdown('<div class="seccion-titulo">📏 Cálculo de distancias</div>',
+    st.markdown(f'<div class="seccion-titulo">{T["calculo"]}</div>',
                 unsafe_allow_html=True)
 
-    if st.button("✅ Calcular distancias y confirmar",
-                 type="primary", use_container_width=True):
+    if st.button(T["boton_calcular"], type="primary", use_container_width=True):
 
         if not ORS_API_KEY:
-            st.error("⚠️ No se ha configurado la clave de OpenRouteService.")
+            st.error(T["error_ors"])
             st.stop()
 
-        with st.spinner("Calculando distancias..."):
+        with st.spinner(T["spinner"]):
             lon_orig, lat_orig = geocodificar_nominatim(
-                domicilio_final, municipio_final, cp_final
-            )
+                domicilio_final, municipio_final, cp_final)
 
             if lon_orig is None:
-                st.error(
-                    "❌ No se ha podido geolocalizar tu domicilio. "
-                    "Si tu dirección es correcta, selecciona 'No, quiero corregirlo' "
-                    "e introduce la dirección en formato: Calle Mayor 5, Bilbao, 48001."
-                )
+                st.error(T["error_geolocalizacion"])
                 st.stop()
 
             resultados   = []
@@ -469,19 +712,24 @@ def main():
                 lat_dest = centro_data.iloc[0]["LAT"]
                 lon_dest = centro_data.iloc[0]["LON"]
 
-                km = calcular_km(
-                    (lon_orig, lat_orig),
-                    (lon_dest, lat_dest),
-                    ORS_API_KEY
-                )
-
+                km = calcular_km((lon_orig, lat_orig), (lon_dest, lat_dest), ORS_API_KEY)
                 if km is None:
                     errores.append(centro)
                     continue
 
+                # KM anuales = km ida × 2 × (días/360 × 226) × % jornada
+                km_anuales = round(
+                    km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025) * pct_jornada, 2
+                )
+
+                modo_display = T["modos_display"].get(modo, modo)
+                comb_display = COMBUSTIBLE_DISPLAY[idioma].get(combustible, combustible)
+
                 resultados.append({
                     "centro": centro, "imputacion": imputacion,
-                    "km": km, "modo": modo, "combustible": combustible
+                    "km": km, "km_ida_vuelta_anuales": km_anuales,
+                    "modo": modo, "combustible": combustible,
+                    "modo_display": modo_display, "comb_display": comb_display,
                 })
 
                 filas_sheets.append([
@@ -489,41 +737,50 @@ def main():
                     codigo, dni, nombre,
                     f"{domicilio_final}, {municipio_final}",
                     municipio_final, cp_final,
-                    centro, imputacion, km,
-                    modo, combustible,
-                    "Sí" if domicilio_corregido else "No",
+                    centro, imputacion, km, km_anuales,
+                    modo_display, comb_display,
+                    "Bai" if domicilio_corregido else "Ez" if idioma == "eu"
+                    else "Sí" if domicilio_corregido else "No",
                 ])
 
         if resultados:
-            st.markdown("**Distancias calculadas:**")
+            st.markdown(f"**{T['distancias_calculadas']}**")
             for r in resultados:
-                comb_txt = (f" — {r['combustible']}"
+                comb_txt = (f" — {r['comb_display']}"
                             if r['combustible'] and r['combustible'] != "—" else "")
                 st.markdown(f"""
                 <div class="km-box">
-                🏢 <strong>{r['centro']}</strong> ({r['imputacion']}% del tiempo)<br>
-                🚗 {r['modo']}{comb_txt}<br>
-                📏 Distancia de ida: <strong>{r['km']} km</strong>
+                🏢 <strong>{r['centro']}</strong> ({r['imputacion']}% {T['denboraren']})<br>
+                🚗 {r['modo_display']}{comb_txt}<br>
+                📏 {T['distancia_ida']} <strong>{r['km']} km</strong><br>
+                📅 KM anuales (ida+vuelta): <strong>{r['km_ida_vuelta_anuales']} km</strong>
                 </div>
                 """, unsafe_allow_html=True)
 
             if errores:
-                st.warning(f"⚠️ No se pudo calcular la distancia para: "
-                           f"{', '.join(errores)}.")
+                st.warning(f"{T['error_centro']} {', '.join(errores)}")
 
+            # Guardar en Sheets
             guardado = guardar_en_sheets(filas_sheets)
+
+            # Actualizar hoja de cálculos
             if guardado:
-                st.markdown("""
-                <div class="exito">
-                ✅ <strong>¡Gracias!</strong> Tus datos han sido registrados correctamente.
-                </div>
+                try:
+                    creds  = get_google_creds()
+                    client = gspread.authorize(creds)
+                    actualizar_sheet_calculos(client, resultados, nombre, codigo)
+                except Exception:
+                    pass
+
+            if guardado:
+                st.markdown(f"""
+                <div class="exito">{T['gracias']}</div>
                 """, unsafe_allow_html=True)
                 st.balloons()
             else:
-                st.warning("⚠️ Los datos se han calculado pero no se han podido guardar. "
-                           "Contacta con el administrador.")
+                st.warning(T["error_sheets"])
         else:
-            st.error("❌ No se han podido calcular las distancias. Inténtalo de nuevo.")
+            st.error(T["error_distancias"])
 
 
 if __name__ == "__main__":
