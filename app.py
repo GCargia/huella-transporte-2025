@@ -348,8 +348,8 @@ def actualizar_sheet_calculos(client, resultados):
                 centros_idx = {row[0]: i + 2 for i, row in enumerate(data[1:])}
 
             fila_idx = centros_idx[centro]
-            val_actual   = float(sheet_calc.cell(fila_idx, col_idx).value or 0)
-            val_total    = float(sheet_calc.cell(fila_idx, col_total).value or 0)
+            val_actual = float(str(sheet_calc.cell(fila_idx, col_idx).value or 0).replace(",", "."))
+            val_total  = float(str(sheet_calc.cell(fila_idx, col_total).value or 0).replace(",", "."))
             sheet_calc.update_cell(fila_idx, col_idx,   round(val_actual + km_anuales, 2))
             sheet_calc.update_cell(fila_idx, col_total, round(val_total  + km_anuales, 2))
 
