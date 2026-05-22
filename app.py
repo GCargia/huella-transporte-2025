@@ -319,20 +319,27 @@ def actualizar_sheet_calculos(client, resultados):
         centros_idx = {row[0]: i + 2 for i, row in enumerate(data[1:])}
 
         for r in resultados:
-            centro     = r["centro"]
-            km_anuales = r["km_ida_vuelta_anuales"]
-            modo       = r["modo"]
+            centro      = r["centro"]
+            km_anuales  = r["km_ida_vuelta_anuales"]
+            modo        = r["modo"]
             combustible = r["combustible"]
 
-            if combustible and combustible not in ["—", ""]:
+            if combustible and combustible.strip() not in ["—", "", "None"]:
                 col_key = f"{modo} - {combustible}"
             else:
                 col_key = modo
 
-            if col_key not in modos_cols:
-                col_key = "TOTAL"
+            # Buscar columna por comparación normalizada
+            col_key_norm = col_key.strip().lower()
+            col_found = None
+            for mc in modos_cols:
+                if mc.strip().lower() == col_key_norm:
+                    col_found = mc
+                    break
+            if col_found is None:
+                col_found = "TOTAL"
 
-            col_idx   = modos_cols.index(col_key) + 2
+            col_idx   = modos_cols.index(col_found) + 2
             col_total = len(modos_cols) + 1
 
             if centro not in centros_idx:
