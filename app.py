@@ -8,6 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import json
 import base64
+import os
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -73,6 +74,7 @@ TEXTOS = {
         "error_geolocalizacion": "❌ Ezin izan da zure helbidea geolokalizatu. Hautatu 'Ez, zuzendu nahi dut' eta sartu helbidea formatu honetan: Kalea Zenbakia, Udalerria, Posta kodea.",
         "distancias_calculadas": "Kalkulatutako distantziak:",
         "distancia_ida": "Joaneko distantzia:",
+        "km_anuales": "Urteko KM (joan-etorri):",
         "error_centro": "⚠️ Ezin izan da distantzia kalkulatu:",
         "gracias": "✅ Eskerrik asko! Zure datuak behar bezala erregistratu dira.",
         "error_sheets": "⚠️ Datuak kalkulatu dira baina ezin izan dira gorde. Jarri harremanetan administratzailearekin.",
@@ -122,6 +124,7 @@ TEXTOS = {
         "error_geolocalizacion": "❌ No se ha podido geolocalizar tu domicilio. Selecciona 'No, quiero corregirlo' e introduce la dirección en formato: Calle Mayor 5, Bilbao, 48001.",
         "distancias_calculadas": "Distancias calculadas:",
         "distancia_ida": "Distancia de ida:",
+        "km_anuales": "KM anuales (ida y vuelta):",
         "error_centro": "⚠️ No se pudo calcular la distancia para:",
         "gracias": "✅ ¡Gracias! Tus datos han sido registrados correctamente.",
         "error_sheets": "⚠️ Los datos se han calculado pero no se han podido guardar. Contacta con el administrador.",
@@ -140,28 +143,31 @@ TEXTOS = {
 }
 
 COMBUSTIBLE_DISPLAY = {
-    "eu": {
-        "Gasolina": "Gasolina",
-        "Diesela": "Diesela",
-        "Elektrikoa": "Elektrikoa",
-        "Hibridoa": "Hibridoa",
-    },
-    "es": {
-        "Gasolina": "Gasolina",
-        "Diesela": "Diésel",
-        "Elektrikoa": "Eléctrico",
-        "Hibridoa": "Híbrido",
-    }
+    "eu": {"Gasolina": "Gasolina", "Diesela": "Diesela", "Elektrikoa": "Elektrikoa", "Hibridoa": "Hibridoa"},
+    "es": {"Gasolina": "Gasolina", "Diesela": "Diésel",  "Elektrikoa": "Eléctrico",  "Hibridoa": "Híbrido"}
 }
 
 # ─────────────────────────────────────────────
-# CARGA DE DATOS
+# LOGO
+# ─────────────────────────────────────────────
+def get_logo_base64():
+    try:
+        if os.path.exists(LOGO_PATH):
+            with open(LOGO_PATH, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+    except Exception:
+        pass
+    return None
+
+# Cargar logo una vez al arrancar el módulo
+LOGO_B64 = get_logo_base64()
+
+# ─────────────────────────────────────────────
+# GOOGLE
 # ─────────────────────────────────────────────
 def get_google_creds():
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive",
-    ]
+    scope = ["https://spreadsheets.google.com/feeds",
+             "https://www.googleapis.com/auth/drive"]
     creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
     return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 
@@ -179,20 +185,16 @@ def descargar_desde_drive(file_id):
 
 @st.cache_data(ttl=0)
 def cargar_datos():
-    # Trabajadores e imputaciones desde Drive
     buf_trab = descargar_desde_drive(DRIVE_FILE_ID_TRAB)
     df_trab  = pd.read_excel(buf_trab, sheet_name="TRABAJADORES")
     buf_trab.seek(0)
     df_imp   = pd.read_excel(buf_trab, sheet_name="IMPUTACIONES")
 
-    # Días trabajados desde Drive
     buf_dias = descargar_desde_drive(DRIVE_FILE_ID_DIAS)
     df_dias  = pd.read_excel(buf_dias)
 
-    # Centros desde fichero local
     df_cent  = pd.read_excel(FICHERO_CENTROS)
 
-    # Limpiar columnas
     for df in [df_trab, df_imp, df_dias, df_cent]:
         df.columns = df.columns.str.strip()
 
@@ -201,9 +203,9 @@ def cargar_datos():
     df_dias["CODIGO"] = df_dias["CODIGO"].astype(int).apply(lambda x: str(x).zfill(4))
     df_trab["DNI"]    = df_trab["DNI"].astype(str).str.strip().str.upper()
     df_imp["CENTRO"]  = df_imp["CENTRO"].astype(str).str.strip()
-    df_imp["IMPUTACION"] = pd.to_numeric(df_imp["IMPUTACION"], errors="coerce")
-    df_dias["Nº DÍAS"]   = pd.to_numeric(df_dias["Nº DÍAS"], errors="coerce")
-    df_dias["% JORNADA"] = pd.to_numeric(df_dias["% JORNADA"], errors="coerce")
+    df_imp["IMPUTACION"]  = pd.to_numeric(df_imp["IMPUTACION"], errors="coerce")
+    df_dias["Nº DÍAS"]    = pd.to_numeric(df_dias["Nº DÍAS"], errors="coerce")
+    df_dias["% JORNADA"]  = pd.to_numeric(df_dias["% JORNADA"], errors="coerce")
 
     def parsear_coords(val):
         try:
@@ -213,28 +215,25 @@ def cargar_datos():
             return None, None
 
     df_cent["LAT"], df_cent["LON"] = zip(*df_cent["COORDENADAS"].apply(parsear_coords))
-
     return df_trab, df_imp, df_cent, df_dias
-
 
 # ─────────────────────────────────────────────
 # GEOCODIFICACIÓN Y RUTAS
 # ─────────────────────────────────────────────
 def limpiar_direccion(direccion):
     reemplazos = [
-        (r"^CL\b",   "Calle"), (r"^C/\b",   "Calle"), (r"^C\b",    "Calle"),
-        (r"^AV\b",   "Avenida"), (r"^AVD\b",  "Avenida"), (r"^AVDA\b", "Avenida"),
-        (r"^PZ\b",   "Plaza"), (r"^PL\b",   "Plaza"),
-        (r"^PS\b",   "Paseo"), (r"^PSO\b",  "Paseo"),
-        (r"^BO\b",   "Barrio"), (r"^Bº\b",   "Barrio"),
-        (r"^URB\b",  "Urbanización"), (r"^CTRA\b", "Carretera"), (r"^CR\b", "Carretera"),
+        (r"^CL\b","Calle"),(r"^C/\b","Calle"),(r"^C\b","Calle"),
+        (r"^AV\b","Avenida"),(r"^AVD\b","Avenida"),(r"^AVDA\b","Avenida"),
+        (r"^PZ\b","Plaza"),(r"^PL\b","Plaza"),
+        (r"^PS\b","Paseo"),(r"^PSO\b","Paseo"),
+        (r"^BO\b","Barrio"),(r"^Bº\b","Barrio"),
+        (r"^URB\b","Urbanización"),(r"^CTRA\b","Carretera"),(r"^CR\b","Carretera"),
     ]
     d = direccion.strip()
     for patron, reemplazo in reemplazos:
         d = re.sub(patron, reemplazo, d, flags=re.IGNORECASE)
     d = re.sub(r"(\d+)\s+\d+\s*[A-Za-z]?\s*$", r"\1", d)
     return d.strip()
-
 
 def geocodificar_nominatim(domicilio, municipio, cp):
     domicilio_limpio = limpiar_direccion(domicilio)
@@ -262,7 +261,6 @@ def geocodificar_nominatim(domicilio, municipio, cp):
             continue
     return None, None
 
-
 def calcular_km(origen, destino, api_key):
     url     = "https://api.openrouteservice.org/v2/directions/driving-car"
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
@@ -275,9 +273,8 @@ def calcular_km(origen, destino, api_key):
     except Exception:
         return None
 
-
 # ─────────────────────────────────────────────
-# GOOGLE SHEETS
+# SHEETS
 # ─────────────────────────────────────────────
 def guardar_en_sheets(filas):
     try:
@@ -286,22 +283,18 @@ def guardar_en_sheets(filas):
         sheet  = client.open(GOOGLE_SHEETS_NAME).sheet1
         if not sheet.get_all_values():
             sheet.append_row([
-                "FECHA", "CODIGO", "DNI", "NOMBRE",
-                "DOMICILIO_USADO", "MUNICIPIO", "CP",
-                "CENTRO", "IMPUTACION_%", "KM_IDA",
-                "KM_IDA_VUELTA_ANUALES", "MODO_TRANSPORTE",
-                "COMBUSTIBLE", "DOMICILIO_CORREGIDO"
+                "FECHA","CODIGO","DNI","NOMBRE","DOMICILIO_USADO","MUNICIPIO","CP",
+                "CENTRO","IMPUTACION_%","KM_IDA","KM_IDA_VUELTA_ANUALES",
+                "MODO_TRANSPORTE","COMBUSTIBLE","DOMICILIO_CORREGIDO"
             ])
         for fila in filas:
             sheet.append_row(fila)
-        return True
+        return client
     except Exception as e:
         st.error(f"Error al guardar en Google Sheets: {e}")
-        return False
+        return None
 
-
-def actualizar_sheet_calculos(client, resultados_trabajador, nombre, codigo):
-    """Actualiza o crea la hoja de cálculos agregados por centro y modo."""
+def actualizar_sheet_calculos(client, resultados):
     try:
         try:
             sheet_calc = client.open(GOOGLE_SHEETS_NAME).worksheet("CALCULOS")
@@ -309,33 +302,28 @@ def actualizar_sheet_calculos(client, resultados_trabajador, nombre, codigo):
             sheet_calc = client.open(GOOGLE_SHEETS_NAME).add_worksheet(
                 title="CALCULOS", rows=100, cols=20)
 
-        # Leer datos existentes
-        data = sheet_calc.get_all_values()
-
-        # Definir cabeceras
         modos_cols = [
-            "Autoa - Gasolina", "Autoa - Diesela", "Autoa - Elektrikoa", "Autoa - Hibridoa",
-            "Furgoneta - Gasolina", "Furgoneta - Diesela", "Furgoneta - Elektrikoa", "Furgoneta - Hibridoa",
-            "Motozikleta - Gasolina", "Motozikleta - Diesela", "Motozikleta - Elektrikoa", "Motozikleta - Hibridoa",
-            "Garraio publikoa", "Oinez edo bizikletaz", "TOTAL"
+            "Autoa - Gasolina","Autoa - Diesela","Autoa - Elektrikoa","Autoa - Hibridoa",
+            "Furgoneta - Gasolina","Furgoneta - Diesela","Furgoneta - Elektrikoa","Furgoneta - Hibridoa",
+            "Motozikleta - Gasolina","Motozikleta - Diesela","Motozikleta - Elektrikoa","Motozikleta - Hibridoa",
+            "Garraio publikoa","Oinez edo bizikletaz","TOTAL"
         ]
         cabecera = ["CENTRO"] + modos_cols
 
+        data = sheet_calc.get_all_values()
         if not data or data[0] != cabecera:
             sheet_calc.clear()
             sheet_calc.append_row(cabecera)
             data = [cabecera]
 
-        # Obtener centros existentes
-        centros_existentes = {row[0]: i+1 for i, row in enumerate(data[1:], start=1)}
+        centros_idx = {row[0]: i + 2 for i, row in enumerate(data[1:])}
 
-        for r in resultados_trabajador:
-            centro      = r["centro"]
-            km_anuales  = r["km_ida_vuelta_anuales"]
-            modo        = r["modo"]
+        for r in resultados:
+            centro     = r["centro"]
+            km_anuales = r["km_ida_vuelta_anuales"]
+            modo       = r["modo"]
             combustible = r["combustible"]
 
-            # Determinar columna
             if combustible and combustible not in ["—", ""]:
                 col_key = f"{modo} - {combustible}"
             else:
@@ -344,34 +332,22 @@ def actualizar_sheet_calculos(client, resultados_trabajador, nombre, codigo):
             if col_key not in modos_cols:
                 col_key = "TOTAL"
 
-            col_idx = modos_cols.index(col_key) + 2  # +2 por columna CENTRO y base 1
-
-            if centro not in centros_existentes:
-                # Añadir fila nueva para este centro
-                nueva_fila = [centro] + [0] * len(modos_cols)
-                sheet_calc.append_row(nueva_fila)
-                fila_idx = len(data) + 1
-                centros_existentes[centro] = fila_idx
-                data.append(nueva_fila)
-            else:
-                fila_idx = centros_existentes[centro]
-
-            # Sumar km al valor existente
-            celda = sheet_calc.cell(fila_idx + 1, col_idx)
-            valor_actual = float(celda.value or 0)
-            sheet_calc.update_cell(fila_idx + 1, col_idx, round(valor_actual + km_anuales, 2))
-
-            # Actualizar TOTAL
+            col_idx   = modos_cols.index(col_key) + 2
             col_total = len(modos_cols) + 1
-            celda_total = sheet_calc.cell(fila_idx + 1, col_total)
-            total_actual = float(celda_total.value or 0)
-            sheet_calc.update_cell(fila_idx + 1, col_total, round(total_actual + km_anuales, 2))
 
-        return True
+            if centro not in centros_idx:
+                sheet_calc.append_row([centro] + [0] * len(modos_cols))
+                data = sheet_calc.get_all_values()
+                centros_idx = {row[0]: i + 2 for i, row in enumerate(data[1:])}
+
+            fila_idx = centros_idx[centro]
+            val_actual   = float(sheet_calc.cell(fila_idx, col_idx).value or 0)
+            val_total    = float(sheet_calc.cell(fila_idx, col_total).value or 0)
+            sheet_calc.update_cell(fila_idx, col_idx,   round(val_actual + km_anuales, 2))
+            sheet_calc.update_cell(fila_idx, col_total, round(val_total  + km_anuales, 2))
+
     except Exception as e:
         st.warning(f"No se pudo actualizar la hoja de cálculos: {e}")
-        return False
-
 
 # ─────────────────────────────────────────────
 # CSS
@@ -381,62 +357,30 @@ def inyectar_css():
     <style>
     .stApp {{ background-color: {COLOR_FONDO}; }}
     #MainMenu, footer {{ visibility: hidden; }}
-    .info-box {{
-        background: {COLOR_BLANCO};
-        border-left: 5px solid {COLOR_TURQUESA};
-        padding: 0.8rem 1rem; border-radius: 6px;
-        margin-bottom: 0.8rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    }}
-    .aviso {{
-        background: #FFF8E1; border-left: 5px solid #FFD54F;
-        padding: 0.8rem 1rem; border-radius: 6px;
-        font-size: 0.88rem; color: #6D5000; margin-bottom: 1rem;
-    }}
-    .exito {{
-        background: #E8F5E9; border-left: 5px solid {COLOR_VERDE};
-        padding: 0.8rem 1rem; border-radius: 6px; margin-bottom: 0.8rem;
-    }}
-    .centro-tag {{
-        background: {COLOR_TURQUESA}; color: white;
-        padding: 4px 12px; border-radius: 14px;
-        font-size: 0.83rem; display: inline-block; margin: 3px; font-weight: 500;
-    }}
-    .seccion-titulo {{
-        font-size: 1.05rem; font-weight: bold; color: {COLOR_GRIS};
-        border-bottom: 2px solid {COLOR_ROSA};
-        padding-bottom: 4px; margin-top: 1.5rem; margin-bottom: 0.8rem;
-    }}
-    .km-box {{
-        background: {COLOR_BLANCO}; border: 1px solid {COLOR_VERDE};
-        border-left: 5px solid {COLOR_VERDE}; padding: 0.8rem 1rem;
-        border-radius: 6px; margin-bottom: 0.6rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    }}
-    .stButton > button {{
-        background-color: {COLOR_TURQUESA} !important; color: white !important;
-        border: none !important; border-radius: 8px !important;
-        font-weight: bold !important; padding: 0.6rem 1.2rem !important;
-    }}
-    .stButton > button:hover {{ background-color: {COLOR_VERDE} !important; }}
-    .idioma-selector {{
-        position: fixed; top: 0.6rem; right: 1rem; z-index: 9999;
-        background: {COLOR_BLANCO}; border-radius: 8px;
-        padding: 4px 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.15);
-        font-size: 0.85rem;
-    }}
-    /* Modal idioma */
-    .modal-overlay {{
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.5); z-index: 10000;
-        display: flex; align-items: center; justify-content: center;
-    }}
-    .modal-box {{
-        background: white; border-radius: 16px; padding: 3rem 4rem;
-        text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-    }}
+    .info-box {{ background:{COLOR_BLANCO}; border-left:5px solid {COLOR_TURQUESA};
+        padding:0.8rem 1rem; border-radius:6px; margin-bottom:0.8rem;
+        box-shadow:0 1px 3px rgba(0,0,0,0.06); }}
+    .aviso {{ background:#FFF8E1; border-left:5px solid #FFD54F;
+        padding:0.8rem 1rem; border-radius:6px; font-size:0.88rem;
+        color:#6D5000; margin-bottom:1rem; }}
+    .exito {{ background:#E8F5E9; border-left:5px solid {COLOR_VERDE};
+        padding:0.8rem 1rem; border-radius:6px; margin-bottom:0.8rem; }}
+    .centro-tag {{ background:{COLOR_TURQUESA}; color:white; padding:4px 12px;
+        border-radius:14px; font-size:0.83rem; display:inline-block;
+        margin:3px; font-weight:500; }}
+    .seccion-titulo {{ font-size:1.05rem; font-weight:bold; color:{COLOR_GRIS};
+        border-bottom:2px solid {COLOR_ROSA}; padding-bottom:4px;
+        margin-top:1.5rem; margin-bottom:0.8rem; }}
+    .km-box {{ background:{COLOR_BLANCO}; border:1px solid {COLOR_VERDE};
+        border-left:5px solid {COLOR_VERDE}; padding:0.8rem 1rem;
+        border-radius:6px; margin-bottom:0.6rem;
+        box-shadow:0 1px 3px rgba(0,0,0,0.06); }}
+    .stButton > button {{ background-color:{COLOR_TURQUESA} !important;
+        color:white !important; border:none !important; border-radius:8px !important;
+        font-weight:bold !important; padding:0.6rem 1.2rem !important; }}
+    .stButton > button:hover {{ background-color:{COLOR_VERDE} !important; }}
     </style>
     """, unsafe_allow_html=True)
-
 
 # ─────────────────────────────────────────────
 # APP PRINCIPAL
@@ -444,8 +388,7 @@ def inyectar_css():
 def main():
     st.set_page_config(
         page_title="Karbono Aztarna 2025 — Argia Fundazioa",
-        page_icon="🌱",
-        layout="centered",
+        page_icon="🌱", layout="centered",
     )
     inyectar_css()
 
@@ -453,27 +396,21 @@ def main():
     if "idioma" not in st.session_state:
         st.session_state["idioma"] = None
 
-    # Cargar logo una sola vez
-    logo_b64 = get_logo_base64(LOGO_PATH)
-
     if st.session_state["idioma"] is None:
-        # Pantalla de selección de idioma
-        if logo_b64:
+        if LOGO_B64:
             st.markdown(f"""
-            <div style="text-align:center; padding: 2rem 0 1rem 0;">
-                <img src="data:image/png;base64,{logo_b64}"
+            <div style="text-align:center; padding:2rem 0 1rem 0;">
+                <img src="data:image/png;base64,{LOGO_B64}"
                      style="max-height:100px; max-width:280px;">
             </div>
             """, unsafe_allow_html=True)
-
         st.markdown("<br>", unsafe_allow_html=True)
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.markdown("""
-            <div style="text-align:center; margin-bottom: 2rem;">
+            <div style="text-align:center; margin-bottom:2rem;">
                 <p style="font-size:1.1rem; color:#6B6B6B; font-weight:500;">
-                    Hautatu hizkuntza / Selecciona idioma
-                </p>
+                    Hautatu hizkuntza / Selecciona idioma</p>
             </div>
             """, unsafe_allow_html=True)
             col_eu, col_es = st.columns(2)
@@ -487,27 +424,22 @@ def main():
                     st.rerun()
         st.stop()
 
-    # ── IDIOMA ACTIVO ─────────────────────────
     idioma = st.session_state["idioma"]
     T      = TEXTOS[idioma]
 
-    # ── SELECTOR DE IDIOMA ARRIBA DERECHA ─────
+    # ── SELECTOR IDIOMA ARRIBA DERECHA ────────
     col_h1, col_h2 = st.columns([4, 1])
     with col_h2:
-        opciones_idioma = {"eu": "🇪🇺 Euskera", "es": "🇪🇸 Castellano"}
-        nuevo_idioma = st.selectbox(
-            T["idioma"],
-            options=list(opciones_idioma.keys()),
-            format_func=lambda x: opciones_idioma[x],
-            index=0 if idioma == "eu" else 1,
-            label_visibility="collapsed",
-            key="selector_idioma"
-        )
-        if nuevo_idioma != idioma:
-            st.session_state["idioma"] = nuevo_idioma
+        opciones = {"eu": "🇪🇺 Euskera", "es": "🇪🇸 Castellano"}
+        nuevo = st.selectbox(T["idioma"], options=list(opciones.keys()),
+                             format_func=lambda x: opciones[x],
+                             index=0 if idioma == "eu" else 1,
+                             label_visibility="collapsed", key="sel_idioma")
+        if nuevo != idioma:
+            st.session_state["idioma"] = nuevo
             st.rerun()
 
-    # ── HEADER CON LOGO ───────────────────────
+    # ── HEADER ────────────────────────────────
     col_txt, col_logo = st.columns([3, 1])
     with col_txt:
         st.markdown(f"""
@@ -518,10 +450,10 @@ def main():
         </div>
         """, unsafe_allow_html=True)
     with col_logo:
-        if logo_b64:
+        if LOGO_B64:
             st.markdown(f"""
             <div style="text-align:right;padding-top:4px;">
-                <img src="data:image/png;base64,{logo_b64}"
+                <img src="data:image/png;base64,{LOGO_B64}"
                      style="max-height:70px;max-width:180px;">
             </div>
             """, unsafe_allow_html=True)
@@ -558,25 +490,23 @@ def main():
         st.error(T["error_credenciales"])
         st.stop()
 
-    row    = trabajador.iloc[0]
+    row   = trabajador.iloc[0]
     nombre = row["NOMBRE"]
 
-    # Obtener días trabajados y % jornada
-    dias_row     = df_dias[df_dias["CODIGO"] == codigo]
-    dias_trab    = float(dias_row.iloc[0]["Nº DÍAS"]) if not dias_row.empty else DIAS_BASE
-    pct_jornada  = float(dias_row.iloc[0]["% JORNADA"]) if not dias_row.empty else 1.0
+    dias_row    = df_dias[df_dias["CODIGO"] == codigo]
+    dias_trab   = float(dias_row.iloc[0]["Nº DÍAS"])   if not dias_row.empty else DIAS_BASE
+    pct_jornada = float(dias_row.iloc[0]["% JORNADA"]) if not dias_row.empty else 1.0
 
-    st.markdown(f"""
-    <div class="exito">{T['bienvenido']} <strong>{nombre}</strong></div>
-    """, unsafe_allow_html=True)
+    st.markdown(f'<div class="exito">{T["bienvenido"]} <strong>{nombre}</strong></div>',
+                unsafe_allow_html=True)
 
-    # ── PASO 2: DATOS DEL TRABAJADOR ─────────
+    # ── PASO 2: DATOS ─────────────────────────
     st.markdown(f'<div class="seccion-titulo">{T["tus_datos"]}</div>',
                 unsafe_allow_html=True)
 
     domicilio_original = row["DIREC.TRABAJ"]
     municipio_original = row["POBLACION"]
-    cp_original        = str(int(row["COD. POSTAL TRAB."])) if pd.notna(
+    cp_original = str(int(row["COD. POSTAL TRAB."])) if pd.notna(
         row["COD. POSTAL TRAB."]) else ""
 
     st.markdown(f"""
@@ -585,7 +515,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    centros_trab = df_imp[df_imp["CODIGO"] == codigo][["CENTRO", "IMPUTACION"]].copy()
+    centros_trab = df_imp[df_imp["CODIGO"] == codigo][["CENTRO","IMPUTACION"]].copy()
     centros_trab["IMPUTACION_%"] = (centros_trab["IMPUTACION"] * 100).round(1)
 
     st.markdown(f"**{T['centros_trabajo']}**")
@@ -595,39 +525,30 @@ def main():
     ])
     st.markdown(tags + "<br><br>", unsafe_allow_html=True)
 
-    # ── PASO 3: VERIFICAR DOMICILIO ───────────
+    # ── PASO 3: DOMICILIO ─────────────────────
     st.markdown(f'<div class="seccion-titulo">{T["domicilio_habitual"]}</div>',
                 unsafe_allow_html=True)
 
-    domicilio_correcto = st.radio(
-        T["domicilio_correcto"],
-        options=[T["si_correcto"], T["no_correcto"]],
-        index=0,
-    )
+    dom_correcto = st.radio(T["domicilio_correcto"],
+                            options=[T["si_correcto"], T["no_correcto"]], index=0)
 
-    domicilio_final     = domicilio_original
-    municipio_final     = municipio_original
-    cp_final            = cp_original
-    domicilio_corregido = False
+    domicilio_final = domicilio_original
+    municipio_final = municipio_original
+    cp_final        = cp_original
+    dom_corregido   = False
 
-    if domicilio_correcto == T["no_correcto"]:
+    if dom_correcto == T["no_correcto"]:
         st.markdown(f"**{T['introduce_domicilio']}**")
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            domicilio_final = st.text_input(T["calle"],
-                                            placeholder="Ej: Calle Mayor 5 2A")
-        with col2:
-            municipio_final = st.text_input(T["municipio"],
-                                            placeholder="Ej: Bilbao")
-        with col3:
-            cp_final = st.text_input(T["cp"], placeholder="Ej: 48001")
-
+        c1, c2, c3 = st.columns([3, 1, 1])
+        with c1: domicilio_final = st.text_input(T["calle"], placeholder="Ej: Calle Mayor 5 2A")
+        with c2: municipio_final = st.text_input(T["municipio"], placeholder="Ej: Bilbao")
+        with c3: cp_final        = st.text_input(T["cp"], placeholder="Ej: 48001")
         if not domicilio_final or not municipio_final or not cp_final:
             st.warning(T["aviso_domicilio"])
             st.stop()
-        domicilio_corregido = True
+        dom_corregido = True
 
-    # ── PASO 4: MODO DE TRANSPORTE POR CENTRO ─
+    # ── PASO 4: TRANSPORTE ────────────────────
     st.markdown(f'<div class="seccion-titulo">{T["modo_transporte"]}</div>',
                 unsafe_allow_html=True)
     st.caption(T["modo_caption"])
@@ -636,10 +557,9 @@ def main():
     combustible_por_centro = {}
     todo_completado        = True
 
-    for _, centro_row in centros_trab.iterrows():
-        centro = centro_row["CENTRO"]
-        pct    = centro_row["IMPUTACION_%"]
-
+    for _, cr in centros_trab.iterrows():
+        centro = cr["CENTRO"]
+        pct    = cr["IMPUTACION_%"]
         st.markdown(f"**🏢 {centro}** ({pct}% {T['denboraren']})")
 
         modo = st.selectbox(
@@ -651,24 +571,24 @@ def main():
 
         if modo == T["selecciona"]:
             todo_completado = False
-            modos_por_centro[centro]       = ""
+            modos_por_centro[centro] = ""
             combustible_por_centro[centro] = ""
             continue
 
         modos_por_centro[centro] = modo
 
         if modo in VEHICULOS_CON_COMBUSTIBLE:
-            combustible = st.selectbox(
+            comb = st.selectbox(
                 f"{T['combustible_label']} {centro}",
                 options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
                 format_func=lambda x: COMBUSTIBLE_DISPLAY[idioma].get(x, x) if x != T["selecciona"] else x,
                 key=f"comb_{centro}"
             )
-            if combustible == T["selecciona"]:
+            if comb == T["selecciona"]:
                 todo_completado = False
                 combustible_por_centro[centro] = ""
             else:
-                combustible_por_centro[centro] = combustible
+                combustible_por_centro[centro] = comb
         else:
             combustible_por_centro[centro] = "—"
 
@@ -677,12 +597,11 @@ def main():
     if not todo_completado:
         st.stop()
 
-    # ── PASO 5: CALCULAR KM ───────────────────
+    # ── PASO 5: CALCULAR ──────────────────────
     st.markdown(f'<div class="seccion-titulo">{T["calculo"]}</div>',
                 unsafe_allow_html=True)
 
     if st.button(T["boton_calcular"], type="primary", use_container_width=True):
-
         if not ORS_API_KEY:
             st.error(T["error_ors"])
             st.stop()
@@ -699,30 +618,25 @@ def main():
             filas_sheets = []
             errores      = []
 
-            for _, centro_row in centros_trab.iterrows():
-                centro      = centro_row["CENTRO"]
-                imputacion  = centro_row["IMPUTACION_%"]
+            for _, cr in centros_trab.iterrows():
+                centro      = cr["CENTRO"]
+                imputacion  = cr["IMPUTACION_%"]
                 modo        = modos_por_centro.get(centro, "")
                 combustible = combustible_por_centro.get(centro, "")
 
-                centro_data = df_cent[df_cent["CENTRO"].str.strip() == centro]
-                if centro_data.empty or pd.isna(centro_data.iloc[0]["LAT"]):
+                cd = df_cent[df_cent["CENTRO"].str.strip() == centro]
+                if cd.empty or pd.isna(cd.iloc[0]["LAT"]):
                     errores.append(centro)
                     continue
 
-                lat_dest = centro_data.iloc[0]["LAT"]
-                lon_dest = centro_data.iloc[0]["LON"]
-
-                km = calcular_km((lon_orig, lat_orig), (lon_dest, lat_dest), ORS_API_KEY)
+                km = calcular_km((lon_orig, lat_orig),
+                                 (cd.iloc[0]["LON"], cd.iloc[0]["LAT"]),
+                                 ORS_API_KEY)
                 if km is None:
                     errores.append(centro)
                     continue
 
-                # KM anuales = km ida × 2 × (días/360 × 226) × % jornada
-                km_anuales = round(
-                    km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025) * pct_jornada, 2
-                )
-
+                km_anuales   = round(km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025) * pct_jornada, 2)
                 modo_display = T["modos_display"].get(modo, modo)
                 comb_display = COMBUSTIBLE_DISPLAY[idioma].get(combustible, combustible)
 
@@ -740,43 +654,31 @@ def main():
                     municipio_final, cp_final,
                     centro, imputacion, km, km_anuales,
                     modo_display, comb_display,
-                    "Bai" if domicilio_corregido else "Ez" if idioma == "eu"
-                    else "Sí" if domicilio_corregido else "No",
+                    ("Bai" if dom_corregido else "Ez") if idioma == "eu"
+                    else ("Sí" if dom_corregido else "No"),
                 ])
 
         if resultados:
             st.markdown(f"**{T['distancias_calculadas']}**")
             for r in resultados:
-                comb_txt = (f" — {r['comb_display']}"
-                            if r['combustible'] and r['combustible'] != "—" else "")
+                comb_txt = f" — {r['comb_display']}" if r['combustible'] not in ["—",""] else ""
                 st.markdown(f"""
                 <div class="km-box">
                 🏢 <strong>{r['centro']}</strong> ({r['imputacion']}% {T['denboraren']})<br>
                 🚗 {r['modo_display']}{comb_txt}<br>
                 📏 {T['distancia_ida']} <strong>{r['km']} km</strong><br>
-                📅 KM anuales (ida+vuelta): <strong>{r['km_ida_vuelta_anuales']} km</strong>
+                📅 {T['km_anuales']} <strong>{r['km_ida_vuelta_anuales']} km</strong>
                 </div>
                 """, unsafe_allow_html=True)
 
             if errores:
                 st.warning(f"{T['error_centro']} {', '.join(errores)}")
 
-            # Guardar en Sheets
-            guardado = guardar_en_sheets(filas_sheets)
-
-            # Actualizar hoja de cálculos
-            if guardado:
-                try:
-                    creds  = get_google_creds()
-                    client = gspread.authorize(creds)
-                    actualizar_sheet_calculos(client, resultados, nombre, codigo)
-                except Exception:
-                    pass
-
-            if guardado:
-                st.markdown(f"""
-                <div class="exito">{T['gracias']}</div>
-                """, unsafe_allow_html=True)
+            client = guardar_en_sheets(filas_sheets)
+            if client:
+                actualizar_sheet_calculos(client, resultados)
+                st.markdown(f'<div class="exito">{T["gracias"]}</div>',
+                            unsafe_allow_html=True)
                 st.balloons()
             else:
                 st.warning(T["error_sheets"])
