@@ -597,18 +597,9 @@ def main():
         modos_centro = []
         pct_total = 0
 
-        # Inicializar porcentajes en session_state
-        key_pcts = f"pcts_{centro}"
-        if key_pcts not in st.session_state or len(st.session_state[key_pcts]) != n_modos:
-            # Repartir 100% equitativamente al cambiar número de modos
-            base = 100 // n_modos
-            resto = 100 - base * n_modos
-            st.session_state[key_pcts] = [base + (1 if i == 0 else 0) * resto for i in range(n_modos)]
-
         for i in range(n_modos):
             st.markdown(f'<div class="modo-box">', unsafe_allow_html=True)
 
-            # Fila 1: modo de transporte
             modo = st.selectbox(
                 f"{T['modo_label']} {i+1}",
                 options=[T["selecciona"]] + TODOS_MODOS,
@@ -617,7 +608,6 @@ def main():
             )
 
             combustible = "—"
-            # Fila 2: combustible (solo si aplica) y % de uso en la misma fila
             if n_modos > 1:
                 if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
                     col_comb, col_pct, col_del = st.columns([3, 2, 1])
@@ -636,34 +626,19 @@ def main():
                 with col_pct:
                     with st.expander("ℹ️"):
                         st.caption(T["pct_tooltip"])
-                    pct_actual = st.session_state[key_pcts][i]
-                    # El último modo no es editable, es el restante automático
-                    if i == n_modos - 1:
-                        restante = 100 - sum(st.session_state[key_pcts][:-1])
-                        restante = max(1, restante)
-                        st.session_state[key_pcts][i] = restante
-                        st.markdown(f"**{T['pct_uso']}: {restante}%** *({'Kalkulu automatikoa' if idioma == 'eu' else 'Cálculo automático'})*")
-                        pct_modo = restante
-                    else:
-                        pct_modo = st.number_input(
-                            T["pct_uso"],
-                            min_value=1,
-                            max_value=99 - sum(st.session_state[key_pcts][i+1:-1]) if n_modos > 2 else 99,
-                            value=min(pct_actual, 99),
-                            key=f"pct_{centro}_{i}",
-                        )
-                        if pct_modo != st.session_state[key_pcts][i]:
-                            st.session_state[key_pcts][i] = pct_modo
-                            st.rerun()
+                    pct_modo = st.number_input(
+                        T["pct_uso"],
+                        min_value=1, max_value=99,
+                        value=50,
+                        key=f"pct_{centro}_{i}",
+                    )
 
                 with col_del:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if i > 0 and st.button(T["eliminar_modo"], key=f"del_{centro}_{i}"):
                         st.session_state[key_n] = n_modos - 1
-                        del st.session_state[key_pcts]
                         st.rerun()
             else:
-                # Modo único: mostrar combustible si aplica, sin % ni botón eliminar
                 if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
                     combustible = st.selectbox(
                         T["combustible_label"],
@@ -692,6 +667,11 @@ def main():
             if st.button(T["anadir_modo"], key=f"add_{centro}"):
                 st.session_state[key_n] = n_modos + 1
                 st.rerun()
+
+        # Validar que suman 100%
+        if n_modos > 1 and modos_centro and round(pct_total) != 100:
+            st.warning(T["error_pct"])
+            todo_completado = False
 
         modos_por_centro[centro] = modos_centro
         st.markdown("---")
