@@ -372,15 +372,33 @@ def geocodificar_nominatim(domicilio, municipio, cp):
     """
     Geocodifica una dirección usando Nominatim con múltiples intentos progresivamente
     más permisivos. Valida que el resultado esté en el País Vasco / norte de España.
+
+    En Bizkaia/Gipuzkoa, OpenStreetMap indexa muchas calles en euskera (ej: "Los Tilos Kalea"
+    en vez de "Calle Los Tilos"), por lo que se añaden intentos sin el prefijo de tipo de vía
+    y con el nombre de calle solo + municipio/CP.
     """
     domicilio_limpio = limpiar_direccion(domicilio)
 
+    # Nombre de la vía sin tipo (ej: "Calle LOS TILOS 16" → "LOS TILOS 16")
+    nombre_sin_tipo = re.sub(
+        r"^(Calle|Avenida|Plaza|Paseo|Barrio|Grupo|Pasaje|Camino|Carretera|Urbanización)\s+",
+        "", domicilio_limpio, flags=re.IGNORECASE
+    ).strip()
+
+    # Nombre de la vía sin tipo y sin número (ej: "LOS TILOS")
+    nombre_sin_numero = re.sub(r"\s+\d+.*$", "", nombre_sin_tipo).strip()
+
     intentos = [
+        # 1. Dirección completa expandida
         f"{domicilio_limpio}, {municipio}, {cp}, España",
         f"{domicilio_limpio}, {municipio}, España",
-        f"{domicilio_limpio}, {cp}, España",
-        # Intentar solo con el nombre de la vía (sin número), municipio y CP
-        f"{re.sub(r'\\d.*$', '', domicilio_limpio).strip()}, {municipio}, {cp}, España",
+        # 2. Sin prefijo de tipo de vía (funciona mejor con OSM en euskera)
+        f"{nombre_sin_tipo}, {municipio}, {cp}, España",
+        f"{nombre_sin_tipo}, {municipio}, España",
+        # 3. Solo nombre de calle sin número (para calles con nombre en euskera)
+        f"{nombre_sin_numero}, {municipio}, {cp}, España",
+        f"{nombre_sin_numero}, {municipio}, España",
+        # 4. Fallback por municipio y CP
         f"{municipio}, {cp}, España",
         f"{cp}, España",
     ]
