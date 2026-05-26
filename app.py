@@ -603,14 +603,34 @@ def main():
         label = f"**{T['domicilio_1'] if d_idx == 0 else T['domicilio_2']}**"
         st.markdown(label)
 
-        dom_correcto = st.radio(
-            T["domicilio_correcto"],
-            options=[T["si_correcto"], T["no_correcto"]],
-            index=0,
-            key=f"dom_correcto_{d_idx}"
-        )
-
-        if dom_correcto == T["no_correcto"]:
+        if d_idx == 0:
+            # Primer domicilio: preguntar si es correcto
+            dom_correcto = st.radio(
+                T["domicilio_correcto"],
+                options=[T["si_correcto"], T["no_correcto"]],
+                index=0,
+                key=f"dom_correcto_{d_idx}"
+            )
+            if dom_correcto == T["no_correcto"]:
+                st.markdown(f"**{T['introduce_domicilio']}**")
+                c1, c2, c3 = st.columns([3, 1, 1])
+                with c1: dom_calle = st.text_input(T["calle"], placeholder="Ej: Calle Mayor 5 2A", key=f"dom_calle_{d_idx}")
+                with c2: dom_muni  = st.text_input(T["municipio"], placeholder="Ej: Bilbao", key=f"dom_muni_{d_idx}")
+                with c3: dom_cp    = st.text_input(T["cp"], placeholder="Ej: 48001", key=f"dom_cp_{d_idx}")
+                if not dom_calle or not dom_muni or not dom_cp:
+                    st.warning(T["aviso_domicilio"])
+                    dom_valido = False
+                    dom_calle = domicilio_original
+                    dom_muni  = municipio_original
+                    dom_cp    = cp_original
+                corregido = True
+            else:
+                dom_calle = domicilio_original
+                dom_muni  = municipio_original
+                dom_cp    = cp_original
+                corregido = False
+        else:
+            # Segundo domicilio: directamente campos para rellenar
             st.markdown(f"**{T['introduce_domicilio']}**")
             c1, c2, c3 = st.columns([3, 1, 1])
             with c1: dom_calle = st.text_input(T["calle"], placeholder="Ej: Calle Mayor 5 2A", key=f"dom_calle_{d_idx}")
@@ -619,15 +639,10 @@ def main():
             if not dom_calle or not dom_muni or not dom_cp:
                 st.warning(T["aviso_domicilio"])
                 dom_valido = False
-                dom_calle = domicilio_original
-                dom_muni  = municipio_original
-                dom_cp    = cp_original
+                dom_calle = ""
+                dom_muni  = ""
+                dom_cp    = ""
             corregido = True
-        else:
-            dom_calle = domicilio_original
-            dom_muni  = municipio_original
-            dom_cp    = cp_original
-            corregido = False
 
         pct_dom = 100
         if st.session_state["n_domicilios"] > 1:
@@ -811,63 +826,53 @@ def main():
                     errores.append(centro)
                     continue
 
-                # KM ponderado por % de cada domicilio
-                km_ponderado = 0
-                km_error = False
+                # Calcular km por separado para cada domicilio
                 for dom_geo in domicilios_geo:
-                    km_dom = calcular_km(
+                    km = calcular_km(
                         (dom_geo["lon"], dom_geo["lat"]),
                         (cd.iloc[0]["LON"], cd.iloc[0]["LAT"]),
                         ORS_API_KEY
                     )
-                    if km_dom is None:
-                        errores.append(centro)
-                        km_error = True
-                        break
-                    km_ponderado += km_dom * (dom_geo["pct"] / 100)
+                    if km is None:
+                        errores.append(f"{centro} ({dom_geo['municipio']})")
+                        continue
 
-                if km_error:
-                    continue
-                km = round(km_ponderado, 2)
+                    dom_corregido_txt = ("Bai" if dom_geo["corregido"] else "Ez") if idioma == "eu" else ("Sí" if dom_geo["corregido"] else "No")
 
-                dom_desc = " + ".join([
-                    f"{d['calle']}, {d['municipio']} ({d['pct']}%)"
-                    for d in domicilios
-                ])
-                dom_corregido_txt = ("Bai" if any(d["corregido"] for d in domicilios) else "Ez") if idioma == "eu" else ("Sí" if any(d["corregido"] for d in domicilios) else "No")
+                    for m in modos_por_centro.get(centro, []):
+                        modo        = m["modo"]
+                        combustible = m["combustible"]
+                        pct_modo    = m["pct_modo"] / 100
 
-                for m in modos_por_centro.get(centro, []):
-                    modo        = m["modo"]
-                    combustible = m["combustible"]
-                    pct_modo    = m["pct_modo"] / 100
+                        km_anuales = round(
+                            km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025)
+                            * pct_jornada * (imputacion / 100) * pct_modo * (dom_geo["pct"] / 100), 2
+                        )
 
-                    km_anuales = round(
-                        km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025)
-                        * pct_jornada * (imputacion / 100) * pct_modo, 2
-                    )
+                        modo_es = TEXTOS["es"]["modos_display"].get(modo, modo)
+                        comb_es = COMBUSTIBLE_DISPLAY["es"].get(combustible, combustible)
+                        modo_display = T["modos_display"].get(modo, modo)
+                        comb_display = COMBUSTIBLE_DISPLAY[idioma].get(combustible, combustible)
 
-                    modo_es = TEXTOS["es"]["modos_display"].get(modo, modo)
-                    comb_es = COMBUSTIBLE_DISPLAY["es"].get(combustible, combustible)
-                    modo_display = T["modos_display"].get(modo, modo)
-                    comb_display = COMBUSTIBLE_DISPLAY[idioma].get(combustible, combustible)
+                        resultados.append({
+                            "centro": centro, "imputacion": imputacion,
+                            "km": km, "km_ida_vuelta_anuales": km_anuales,
+                            "modo": modo_es, "combustible": comb_es,
+                            "modo_display": modo_display, "comb_display": comb_display,
+                            "pct_modo": int(m["pct_modo"]),
+                            "domicilio": f"{dom_geo['calle']}, {dom_geo['municipio']}",
+                            "pct_dom": dom_geo["pct"],
+                        })
 
-                    resultados.append({
-                        "centro": centro, "imputacion": imputacion,
-                        "km": km, "km_ida_vuelta_anuales": km_anuales,
-                        "modo": modo_es, "combustible": comb_es,
-                        "modo_display": modo_display, "comb_display": comb_display,
-                        "pct_modo": int(m["pct_modo"]),
-                    })
-
-                    filas_sheets.append([
-                        datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        codigo, correo_input, nombre,
-                        dom_desc,
-                        domicilios[0]["municipio"], domicilios[0]["cp"],
-                        centro, imputacion, km, km_anuales,
-                        modo_display, comb_display, int(m["pct_modo"]),
-                        dom_corregido_txt,
-                    ])
+                        filas_sheets.append([
+                            datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            codigo, correo_input, nombre,
+                            f"{dom_geo['calle']}, {dom_geo['municipio']} ({dom_geo['pct']}%)",
+                            dom_geo["municipio"], dom_geo["cp"],
+                            centro, imputacion, km, km_anuales,
+                            modo_display, comb_display, int(m["pct_modo"]),
+                            dom_corregido_txt,
+                        ])
 
         if resultados:
             st.markdown(f"**{T['distancias_calculadas']}**")
@@ -882,9 +887,10 @@ def main():
                     st.markdown(f"**🏢 {r['centro']}** ({pct_label})")
                 comb_txt = f" — {r['comb_display']}" if r['combustible'] not in ["—",""] else ""
                 pct_txt  = f" ({r['pct_modo']}%)" if r["pct_modo"] < 100 else ""
+                dom_txt  = f"🏠 {r.get('domicilio', '')} ({r.get('pct_dom', 100)}%)<br>" if len(domicilios_geo) > 1 else ""
                 st.markdown(f"""
                 <div class="km-box">
-                🚗 {r['modo_display']}{comb_txt}{pct_txt}<br>
+                {dom_txt}🚗 {r['modo_display']}{comb_txt}{pct_txt}<br>
                 📏 {T['distancia_ida']} <strong>{r['km']} km</strong><br>
                 📅 {T['km_anuales']} <strong>{r['km_ida_vuelta_anuales']} km</strong>
                 </div>
