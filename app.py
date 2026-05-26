@@ -803,50 +803,68 @@ def main():
             client = guardar_en_sheets(filas_sheets)
             if client:
                 actualizar_sheet_calculos(client, resultados)
+                st.session_state["datos_enviados"] = True
+                st.session_state["piloto_codigo"]  = codigo
+                st.session_state["piloto_correo"]  = correo_input
+                st.session_state["piloto_nombre"]  = nombre
+                st.session_state["piloto_client"]  = client
+                st.session_state["piloto_idioma"]  = idioma
                 st.markdown(f'<div class="exito">{T["gracias"]}</div>',
                             unsafe_allow_html=True)
                 st.balloons()
-
-                # ── FORMULARIO PILOTO ─────────────────────
-                st.markdown("---")
-                st.markdown(f'<div class="seccion-titulo">{T["piloto_titulo"]}</div>',
-                            unsafe_allow_html=True)
-                st.caption(T["piloto_subtitulo"])
-
-                p1 = st.selectbox(T["piloto_p1"], options=T["piloto_p1_ops"], key="piloto_p1")
-                p2 = st.selectbox(T["piloto_p2"], options=T["piloto_p2_ops"], key="piloto_p2")
-                p3 = st.selectbox(T["piloto_p3"], options=T["piloto_p3_ops"], key="piloto_p3")
-                p4 = st.text_area(T["piloto_p4"], placeholder="...", key="piloto_p4", height=100)
-
-                if st.button(T["piloto_boton"], key="piloto_enviar"):
-                    selecciona = T["piloto_p1_ops"][0]
-                    if p1 == selecciona or p2 == selecciona or p3 == selecciona:
-                        st.warning(T["piloto_incompleto"])
-                    else:
-                        try:
-                            try:
-                                sheet_piloto = client.open(GOOGLE_SHEETS_NAME).worksheet("PILOTO")
-                            except Exception:
-                                sheet_piloto = client.open(GOOGLE_SHEETS_NAME).add_worksheet(
-                                    title="PILOTO", rows=200, cols=10)
-                                sheet_piloto.append_row([
-                                    "FECHA", "CODIGO", "CORREO", "NOMBRE",
-                                    "FACILIDAD_USO", "DATOS_CORRECTOS",
-                                    "COMPRENSION", "COMENTARIOS"
-                                ])
-                            sheet_piloto.append_row([
-                                datetime.now().strftime("%Y-%m-%d %H:%M"),
-                                codigo, correo_input, nombre,
-                                p1, p2, p3, p4
-                            ])
-                            st.markdown(f'<div class="exito">{T["piloto_gracias"]}</div>',
-                                        unsafe_allow_html=True)
-                        except Exception as e:
-                            st.warning(T["piloto_error"])
             else:
                 st.warning(T["error_sheets"])
         else:
             st.error(T["error_distancias"])
+
+    # ── FORMULARIO PILOTO — fuera del botón calcular ──
+    if st.session_state.get("datos_enviados"):
+        idioma_p  = st.session_state.get("piloto_idioma", idioma)
+        TP        = TEXTOS[idioma_p]
+        codigo_p  = st.session_state["piloto_codigo"]
+        correo_p  = st.session_state["piloto_correo"]
+        nombre_p  = st.session_state["piloto_nombre"]
+        client_p  = st.session_state["piloto_client"]
+
+        st.markdown("---")
+        st.markdown(f'<div class="seccion-titulo">{TP["piloto_titulo"]}</div>',
+                    unsafe_allow_html=True)
+        st.caption(TP["piloto_subtitulo"])
+
+        p1 = st.selectbox(TP["piloto_p1"], options=TP["piloto_p1_ops"], key="piloto_p1")
+        p2 = st.selectbox(TP["piloto_p2"], options=TP["piloto_p2_ops"], key="piloto_p2")
+        p3 = st.selectbox(TP["piloto_p3"], options=TP["piloto_p3_ops"], key="piloto_p3")
+        p4 = st.text_area(TP["piloto_p4"], placeholder="...", key="piloto_p4", height=100)
+
+        if not st.session_state.get("piloto_enviado"):
+            if st.button(TP["piloto_boton"], key="piloto_enviar"):
+                selecciona = TP["piloto_p1_ops"][0]
+                if p1 == selecciona or p2 == selecciona or p3 == selecciona:
+                    st.warning(TP["piloto_incompleto"])
+                else:
+                    try:
+                        try:
+                            sheet_piloto = client_p.open(GOOGLE_SHEETS_NAME).worksheet("PILOTO")
+                        except Exception:
+                            sheet_piloto = client_p.open(GOOGLE_SHEETS_NAME).add_worksheet(
+                                title="PILOTO", rows=200, cols=10)
+                            sheet_piloto.append_row([
+                                "FECHA", "CODIGO", "CORREO", "NOMBRE",
+                                "FACILIDAD_USO", "DATOS_CORRECTOS",
+                                "COMPRENSION", "COMENTARIOS"
+                            ])
+                        sheet_piloto.append_row([
+                            datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            codigo_p, correo_p, nombre_p,
+                            p1, p2, p3, p4
+                        ])
+                        st.session_state["piloto_enviado"] = True
+                        st.rerun()
+                    except Exception:
+                        st.warning(TP["piloto_error"])
+        else:
+            st.markdown(f'<div class="exito">{TP["piloto_gracias"]}</div>',
+                        unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
