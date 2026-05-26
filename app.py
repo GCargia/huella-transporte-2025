@@ -83,6 +83,19 @@ TEXTOS = {
         "km_anuales": "Urteko KM (joan-etorri):",
         "error_centro": "⚠️ Ezin izan da distantzia kalkulatu:",
         "gracias": "✅ Eskerrik asko! Zure datuak behar bezala erregistratu dira.",
+        "piloto_titulo": "📋 Pilotoaren balorazioa",
+        "piloto_subtitulo": "Zure iritzia lagungarria izango da tresna hobetzeko. Minutu bat baino gutxiago irauten du.",
+        "piloto_p1": "1. Nola baloratuko zenuke tresna erabiltzeko erreztasuna?",
+        "piloto_p1_ops": ["— Hautatu —", "⭐ Oso zaila", "⭐⭐ Zaila", "⭐⭐⭐ Normala", "⭐⭐⭐⭐ Erraza", "⭐⭐⭐⭐⭐ Oso erraza"],
+        "piloto_p2": "2. Zure datuak ondo agertzen ziren sartzean?",
+        "piloto_p2_ops": ["— Hautatu —", "✅ Bai, dena zuzen", "⚠️ Akatsen bat zegoen", "❌ Datuak okerrak ziren"],
+        "piloto_p3": "3. Ondo ulertu al zenuen tresnak zer eskatzen zizun?",
+        "piloto_p3_ops": ["— Hautatu —", "Bai", "Gutxi gorabehera", "Ez"],
+        "piloto_p4": "4. Iruzkinak edo iradokizunak (aukerakoa)",
+        "piloto_boton": "Balorazioa bidali",
+        "piloto_gracias": "✅ Eskerrik asko zure balorazioagatik!",
+        "piloto_error": "⚠️ Balorazioa ezin izan da gorde. Saiatu berriro.",
+        "piloto_incompleto": "⚠️ Mesedez erantzun 1, 2 eta 3 galderak.",
         "error_sheets": "⚠️ Datuak kalkulatu dira baina ezin izan dira gorde. Jarri harremanetan administratzailearekin.",
         "error_distancias": "❌ Ezin izan dira distantziak kalkulatu. Saiatu berriro.",
         "denboraren": "denboraren",
@@ -139,6 +152,19 @@ TEXTOS = {
         "km_anuales": "KM anuales (ida y vuelta):",
         "error_centro": "⚠️ No se pudo calcular la distancia para:",
         "gracias": "✅ ¡Gracias! Tus datos han sido registrados correctamente.",
+        "piloto_titulo": "📋 Valoración del piloto",
+        "piloto_subtitulo": "Tu opinión nos ayudará a mejorar la herramienta. Menos de un minuto.",
+        "piloto_p1": "1. ¿Cómo valorarías la facilidad de uso de la herramienta?",
+        "piloto_p1_ops": ["— Selecciona —", "⭐ Muy difícil", "⭐⭐ Difícil", "⭐⭐⭐ Normal", "⭐⭐⭐⭐ Fácil", "⭐⭐⭐⭐⭐ Muy fácil"],
+        "piloto_p2": "2. ¿Tus datos aparecían correctamente al entrar?",
+        "piloto_p2_ops": ["— Selecciona —", "✅ Sí, todo correcto", "⚠️ Había algún error", "❌ Los datos eran incorrectos"],
+        "piloto_p3": "3. ¿Entendiste bien qué te pedía la herramienta?",
+        "piloto_p3_ops": ["— Selecciona —", "Sí", "Más o menos", "No"],
+        "piloto_p4": "4. Comentarios o sugerencias (opcional)",
+        "piloto_boton": "Enviar valoración",
+        "piloto_gracias": "✅ ¡Gracias por tu valoración!",
+        "piloto_error": "⚠️ No se ha podido guardar la valoración. Inténtalo de nuevo.",
+        "piloto_incompleto": "⚠️ Por favor responde las preguntas 1, 2 y 3.",
         "error_sheets": "⚠️ Los datos se han calculado pero no se han podido guardar. Contacta con el administrador.",
         "error_distancias": "❌ No se han podido calcular las distancias. Inténtalo de nuevo.",
         "denboraren": "del tiempo",
@@ -780,6 +806,43 @@ def main():
                 st.markdown(f'<div class="exito">{T["gracias"]}</div>',
                             unsafe_allow_html=True)
                 st.balloons()
+
+                # ── FORMULARIO PILOTO ─────────────────────
+                st.markdown("---")
+                st.markdown(f'<div class="seccion-titulo">{T["piloto_titulo"]}</div>',
+                            unsafe_allow_html=True)
+                st.caption(T["piloto_subtitulo"])
+
+                p1 = st.selectbox(T["piloto_p1"], options=T["piloto_p1_ops"], key="piloto_p1")
+                p2 = st.selectbox(T["piloto_p2"], options=T["piloto_p2_ops"], key="piloto_p2")
+                p3 = st.selectbox(T["piloto_p3"], options=T["piloto_p3_ops"], key="piloto_p3")
+                p4 = st.text_area(T["piloto_p4"], placeholder="...", key="piloto_p4", height=100)
+
+                if st.button(T["piloto_boton"], key="piloto_enviar"):
+                    selecciona = T["piloto_p1_ops"][0]
+                    if p1 == selecciona or p2 == selecciona or p3 == selecciona:
+                        st.warning(T["piloto_incompleto"])
+                    else:
+                        try:
+                            try:
+                                sheet_piloto = client.open(GOOGLE_SHEETS_NAME).worksheet("PILOTO")
+                            except Exception:
+                                sheet_piloto = client.open(GOOGLE_SHEETS_NAME).add_worksheet(
+                                    title="PILOTO", rows=200, cols=10)
+                                sheet_piloto.append_row([
+                                    "FECHA", "CODIGO", "CORREO", "NOMBRE",
+                                    "FACILIDAD_USO", "DATOS_CORRECTOS",
+                                    "COMPRENSION", "COMENTARIOS"
+                                ])
+                            sheet_piloto.append_row([
+                                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                codigo, correo_input, nombre,
+                                p1, p2, p3, p4
+                            ])
+                            st.markdown(f'<div class="exito">{T["piloto_gracias"]}</div>',
+                                        unsafe_allow_html=True)
+                        except Exception as e:
+                            st.warning(T["piloto_error"])
             else:
                 st.warning(T["error_sheets"])
         else:
