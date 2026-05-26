@@ -313,40 +313,94 @@ def obtener_envio_anterior(codigo):
 # GEOCODIFICACIÓN Y RUTAS
 # ─────────────────────────────────────────────
 def limpiar_direccion(direccion):
+    """
+    Limpia y normaliza la dirección para mejorar la geocodificación con Nominatim.
+    - Expande abreviaturas de tipo de vía
+    - Elimina información de piso/puerta (todo lo que va tras el número de portal)
+    - Colapsa espacios múltiples
+    """
     reemplazos = [
-        (r"^CL\b","Calle"),(r"^C/\b","Calle"),(r"^C\b","Calle"),
-        (r"^AV\b","Avenida"),(r"^AVD\b","Avenida"),(r"^AVDA\b","Avenida"),
-        (r"^PZ\b","Plaza"),(r"^PL\b","Plaza"),
-        (r"^PS\b","Paseo"),(r"^PSO\b","Paseo"),
-        (r"^BO\b","Barrio"),(r"^Bº\b","Barrio"),
-        (r"^URB\b","Urbanización"),(r"^CTRA\b","Carretera"),(r"^CR\b","Carretera"),
+        (r"^CL\b",   "Calle"),
+        (r"^C/\b",   "Calle"),
+        (r"^AV\b",   "Avenida"),
+        (r"^AVD\b",  "Avenida"),
+        (r"^AVDA\b", "Avenida"),
+        (r"^PZ\b",   "Plaza"),
+        (r"^PL\b",   "Plaza"),
+        (r"^PS\b",   "Paseo"),
+        (r"^PSO\b",  "Paseo"),
+        (r"^BO\b",   "Barrio"),
+        (r"^Bº\b",   "Barrio"),
+        (r"^GR\b",   "Grupo"),
+        (r"^PA\b",   "Pasaje"),
+        (r"^CM\b",   "Camino"),
+        (r"^CT\b",   "Carretera"),
+        (r"^CTRA\b", "Carretera"),
+        (r"^CR\b",   "Carretera"),
+        (r"^URB\.",  "Urbanización"),
+        (r"^URB\b",  "Urbanización"),
     ]
+
     d = direccion.strip()
+
+    # Expandir abreviaturas de tipo de vía
     for patron, reemplazo in reemplazos:
         d = re.sub(patron, reemplazo, d, flags=re.IGNORECASE)
-    d = re.sub(r"(\d+)\s+\d+\s*[A-Za-z]?\s*$", r"\1", d)
+
+    # Colapsar espacios múltiples
+    d = re.sub(r"\s{2,}", " ", d)
+
+    # Eliminar piso/puerta: todo lo que viene después del número de portal.
+    # El número de portal puede ir seguido opcionalmente de una letra pegada (ej: "21B", "3B").
+    # Patrón: número + letra_opcional + (espacio + más_texto_que_no_queremos)
+    # Ejemplos que debe limpiar:
+    #   "Calle Languileria 64 2 B"     → "Calle Languileria 64"
+    #   "Calle Porton Urarte 19 2 DCHA B" → "Calle Porton Urarte 19"
+    #   "Calle Iturribide 59 4 IZ-IZ"  → "Calle Iturribide 59"
+    #   "Calle Peña Santa Marina 2B"   → "Calle Peña Santa Marina 2B"  (letra pegada: ok)
+    #   "Calle La Dinamita 21B BAJO B" → "Calle La Dinamita 21B"
+    d = re.sub(r"(\d+[A-Za-z]?)\s+\d.*$", r"\1", d)
+    d = re.sub(
+        r"(\d+[A-Za-z]?)\s+(BAJO|ÁTICO|ATICO|PRINCIPAL|PPAL|DCHA\.?|IZDA\.?|IZQ\.?|IZD|DC|IZ|CTRO|CENTRO|BLOQUE|BLQ|BAJO)\b.*$",
+        r"\1", d, flags=re.IGNORECASE
+    )
+
     return d.strip()
 
+
 def geocodificar_nominatim(domicilio, municipio, cp):
+    """
+    Geocodifica una dirección usando Nominatim con múltiples intentos progresivamente
+    más permisivos. Valida que el resultado esté en el País Vasco / norte de España.
+    """
     domicilio_limpio = limpiar_direccion(domicilio)
+
     intentos = [
         f"{domicilio_limpio}, {municipio}, {cp}, España",
         f"{domicilio_limpio}, {municipio}, España",
         f"{domicilio_limpio}, {cp}, España",
+        # Intentar solo con el nombre de la vía (sin número), municipio y CP
+        f"{re.sub(r'\\d.*$', '', domicilio_limpio).strip()}, {municipio}, {cp}, España",
         f"{municipio}, {cp}, España",
         f"{cp}, España",
     ]
+
     headers = {"User-Agent": "ArgiaCarbonApp/1.0"}
     for intento in intentos:
+        if not intento.strip().replace(",", "").replace("España", "").strip():
+            continue
         try:
-            r    = requests.get("https://nominatim.openstreetmap.org/search",
-                                params={"q": intento, "format": "json",
-                                        "limit": 1, "countrycodes": "es"},
-                                headers=headers, timeout=10)
+            r = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": intento, "format": "json", "limit": 1, "countrycodes": "es"},
+                headers=headers,
+                timeout=10,
+            )
             data = r.json()
             if data:
                 lat = float(data[0]["lat"])
                 lon = float(data[0]["lon"])
+                # Validar que está en el norte de España (Euskadi + alrededores)
                 if 41.0 <= lat <= 44.5 and -5.0 <= lon <= 2.0:
                     return lon, lat
         except Exception:
@@ -402,26 +456,33 @@ def recalcular_sheet_calculos(client):
         cabecera = datos[0]
         filas    = datos[1:]
 
-        # Índices de columnas necesarias
+        # Índices de columnas necesarias (ENVIO_NUM puede no existir en datos históricos)
         try:
-            idx_codigo   = cabecera.index("CODIGO")
-            idx_envio    = cabecera.index("ENVIO_NUM")
-            idx_centro   = cabecera.index("CENTRO")
-            idx_km       = cabecera.index("KM_IDA_VUELTA_ANUALES")
-            idx_modo     = cabecera.index("MODO_TRANSPORTE")
-            idx_comb     = cabecera.index("COMBUSTIBLE")
+            idx_codigo = cabecera.index("CODIGO")
+            idx_centro = cabecera.index("CENTRO")
+            idx_km     = cabecera.index("KM_IDA_VUELTA_ANUALES")
+            idx_modo   = cabecera.index("MODO_TRANSPORTE")
+            idx_comb   = cabecera.index("COMBUSTIBLE")
         except ValueError as e:
             st.warning(f"No se pudo recalcular CALCULOS: columna no encontrada ({e})")
             return
+
+        # ENVIO_NUM puede no existir en datos históricos: si falta, asumimos 1
+        idx_envio = cabecera.index("ENVIO_NUM") if "ENVIO_NUM" in cabecera else None
+
+        def get_envio_num(fila):
+            if idx_envio is None:
+                return 1
+            try:
+                return int(fila[idx_envio])
+            except (ValueError, IndexError):
+                return 1
 
         # Para cada empleado, quedarse solo con el último envío
         envios_por_codigo = {}
         for f in filas:
             cod = f[idx_codigo]
-            try:
-                num = int(f[idx_envio])
-            except (ValueError, IndexError):
-                num = 1
+            num = get_envio_num(f)
             if cod not in envios_por_codigo or num > envios_por_codigo[cod]:
                 envios_por_codigo[cod] = num
 
@@ -429,10 +490,7 @@ def recalcular_sheet_calculos(client):
         filas_validas = []
         for f in filas:
             cod = f[idx_codigo]
-            try:
-                num = int(f[idx_envio])
-            except (ValueError, IndexError):
-                num = 1
+            num = get_envio_num(f)
             if num == envios_por_codigo.get(cod, num):
                 filas_validas.append(f)
 
