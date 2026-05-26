@@ -52,6 +52,7 @@ TEXTOS = {
         "error_credenciales": "❌ Posta elektronikoa edo NANa ez da zuzena. Mesedez, egiaztatu datuak.",
         "error_codigo": "❌ Sartu zure posta elektroniko korporatiboa.",
         "bienvenido": "✅ Ongi etorri,",
+        "aviso_reenvio": "⚠️ Datuak aurretik bidali dituzu ({}. bidalketa). Zuzendu eta berriro bidal ditzakezu, baina azken bidalketako datuak bakarrik hartuko dira kontuan.",
         "tus_datos": "👤 Zure datuak",
         "domicilio_registrado": "📍 Helbidea erregistratu da:",
         "centros_trabajo": "2025eko lan zentroak:",
@@ -128,6 +129,7 @@ TEXTOS = {
         "error_credenciales": "❌ Correo o DNI incorrecto. Por favor comprueba los datos.",
         "error_codigo": "❌ Introduce tu correo corporativo.",
         "bienvenido": "✅ Bienvenida/o,",
+        "aviso_reenvio": "⚠️ Ya enviaste tus datos anteriormente (envío nº {}). Puedes corregirlos y reenviar, pero solo se tendrá en cuenta el último envío.",
         "tus_datos": "👤 Tus datos",
         "domicilio_registrado": "📍 Domicilio registrado:",
         "centros_trabajo": "Centros de trabajo en 2025:",
@@ -270,6 +272,44 @@ def cargar_datos():
     return df_trab, df_imp, df_cent, df_dias
 
 # ─────────────────────────────────────────────
+# COMPROBACIÓN DE ENVÍOS PREVIOS
+# ─────────────────────────────────────────────
+def obtener_envio_anterior(codigo):
+    """
+    Busca en el Sheet si el empleado (por CODIGO) ya ha enviado datos.
+    Devuelve el número de envío más alto encontrado, o 0 si no hay envíos previos.
+    """
+    try:
+        creds  = get_google_creds()
+        client = gspread.authorize(creds)
+        sheet  = client.open(GOOGLE_SHEETS_NAME).sheet1
+        datos  = sheet.get_all_values()
+        if len(datos) <= 1:
+            return 0
+        cabecera = datos[0]
+        try:
+            idx_codigo  = cabecera.index("CODIGO")
+            idx_envio   = cabecera.index("ENVIO_NUM")
+        except ValueError:
+            # La columna ENVIO_NUM aún no existe (datos históricos sin ella)
+            idx_codigo = cabecera.index("CODIGO")
+            filas_empleado = [f for f in datos[1:] if f[idx_codigo] == codigo]
+            return 1 if filas_empleado else 0
+
+        filas_empleado = [f for f in datos[1:] if f[idx_codigo] == codigo]
+        if not filas_empleado:
+            return 0
+        envios = []
+        for f in filas_empleado:
+            try:
+                envios.append(int(f[idx_envio]))
+            except (ValueError, IndexError):
+                envios.append(1)
+        return max(envios)
+    except Exception:
+        return 0
+
+# ─────────────────────────────────────────────
 # GEOCODIFICACIÓN Y RUTAS
 # ─────────────────────────────────────────────
 def limpiar_direccion(direccion):
@@ -337,7 +377,7 @@ def guardar_en_sheets(filas):
             sheet.append_row([
                 "FECHA","CODIGO","CORREO","NOMBRE","DOMICILIO_USADO","MUNICIPIO","CP",
                 "CENTRO","IMPUTACION_%","KM_IDA","KM_IDA_VUELTA_ANUALES",
-                "MODO_TRANSPORTE","COMBUSTIBLE","PCT_MODO","DOMICILIO_CORREGIDO"
+                "MODO_TRANSPORTE","COMBUSTIBLE","PCT_MODO","DOMICILIO_CORREGIDO","ENVIO_NUM"
             ])
         for fila in filas:
             sheet.append_row(fila)
@@ -346,60 +386,109 @@ def guardar_en_sheets(filas):
         st.error(f"Error al guardar en Google Sheets: {e}")
         return None
 
-def actualizar_sheet_calculos(client, resultados):
-    try:
-        try:
-            sheet_calc = client.open(GOOGLE_SHEETS_NAME).worksheet("CALCULOS")
-        except Exception:
-            sheet_calc = client.open(GOOGLE_SHEETS_NAME).add_worksheet(
-                title="CALCULOS", rows=100, cols=20)
 
+def recalcular_sheet_calculos(client):
+    """
+    Borra y recalcula la pestaña CALCULOS desde cero,
+    usando solo el último envío (ENVIO_NUM más alto) de cada empleado.
+    """
+    try:
+        sheet_main = client.open(GOOGLE_SHEETS_NAME).sheet1
+        datos      = sheet_main.get_all_values()
+
+        if len(datos) <= 1:
+            return
+
+        cabecera = datos[0]
+        filas    = datos[1:]
+
+        # Índices de columnas necesarias
+        try:
+            idx_codigo   = cabecera.index("CODIGO")
+            idx_envio    = cabecera.index("ENVIO_NUM")
+            idx_centro   = cabecera.index("CENTRO")
+            idx_km       = cabecera.index("KM_IDA_VUELTA_ANUALES")
+            idx_modo     = cabecera.index("MODO_TRANSPORTE")
+            idx_comb     = cabecera.index("COMBUSTIBLE")
+        except ValueError as e:
+            st.warning(f"No se pudo recalcular CALCULOS: columna no encontrada ({e})")
+            return
+
+        # Para cada empleado, quedarse solo con el último envío
+        envios_por_codigo = {}
+        for f in filas:
+            cod = f[idx_codigo]
+            try:
+                num = int(f[idx_envio])
+            except (ValueError, IndexError):
+                num = 1
+            if cod not in envios_por_codigo or num > envios_por_codigo[cod]:
+                envios_por_codigo[cod] = num
+
+        # Filtrar filas que corresponden al último envío de cada empleado
+        filas_validas = []
+        for f in filas:
+            cod = f[idx_codigo]
+            try:
+                num = int(f[idx_envio])
+            except (ValueError, IndexError):
+                num = 1
+            if num == envios_por_codigo.get(cod, num):
+                filas_validas.append(f)
+
+        # Agregar km por centro y modo
         modos_cols = [
             "Coche - Gasolina","Coche - Diésel","Coche - Eléctrico","Coche - Híbrido",
             "Furgoneta - Gasolina","Furgoneta - Diésel","Furgoneta - Eléctrico","Furgoneta - Híbrido",
             "Moto - Gasolina","Moto - Diésel","Moto - Eléctrico","Moto - Híbrido",
             "Transporte público","A pie o en bicicleta","TOTAL"
         ]
-        cabecera = ["CENTRO"] + modos_cols
 
-        data = sheet_calc.get_all_values()
-        if not data or data[0] != cabecera:
-            sheet_calc.clear()
-            sheet_calc.append_row(cabecera)
-            data = [cabecera]
+        # acumulador: {centro: {col: km}}
+        acum = {}
+        for f in filas_validas:
+            centro = f[idx_centro]
+            try:
+                km = float(str(f[idx_km]).replace(",", "."))
+            except ValueError:
+                km = 0.0
+            modo        = f[idx_modo].strip()
+            combustible = f[idx_comb].strip()
 
-        centros_idx = {row[0]: i + 2 for i, row in enumerate(data[1:])}
-
-        for r in resultados:
-            centro      = r["centro"]
-            km_anuales  = r["km_ida_vuelta_anuales"]
-            modo        = r["modo"]
-            combustible = r["combustible"]
-
-            if combustible and combustible.strip() not in ["—", "", "None"]:
+            if combustible and combustible not in ["—", "", "None"]:
                 col_key = f"{modo} - {combustible}"
             else:
                 col_key = modo
 
             col_key_norm = col_key.strip().lower()
-            col_found = next((mc for mc in modos_cols if mc.strip().lower() == col_key_norm), "TOTAL")
+            col_found    = next(
+                (mc for mc in modos_cols if mc.strip().lower() == col_key_norm),
+                "TOTAL"
+            )
 
-            col_idx   = modos_cols.index(col_found) + 2
-            col_total = len(modos_cols) + 1
+            if centro not in acum:
+                acum[centro] = {mc: 0.0 for mc in modos_cols}
+            acum[centro][col_found] = round(acum[centro].get(col_found, 0.0) + km, 2)
+            acum[centro]["TOTAL"]   = round(acum[centro].get("TOTAL", 0.0) + km, 2)
 
-            if centro not in centros_idx:
-                sheet_calc.append_row([centro] + [0] * len(modos_cols))
-                data = sheet_calc.get_all_values()
-                centros_idx = {row[0]: i + 2 for i, row in enumerate(data[1:])}
+        # Escribir hoja CALCULOS desde cero
+        try:
+            sheet_calc = client.open(GOOGLE_SHEETS_NAME).worksheet("CALCULOS")
+        except Exception:
+            sheet_calc = client.open(GOOGLE_SHEETS_NAME).add_worksheet(
+                title="CALCULOS", rows=100, cols=20)
 
-            fila_idx  = centros_idx[centro]
-            val_actual = float(str(sheet_calc.cell(fila_idx, col_idx).value or 0).replace(",", "."))
-            val_total  = float(str(sheet_calc.cell(fila_idx, col_total).value or 0).replace(",", "."))
-            sheet_calc.update_cell(fila_idx, col_idx,   round(val_actual + km_anuales, 2))
-            sheet_calc.update_cell(fila_idx, col_total, round(val_total  + km_anuales, 2))
+        sheet_calc.clear()
+        cabecera_calc = ["CENTRO"] + modos_cols
+        sheet_calc.append_row(cabecera_calc)
+
+        for centro, vals in acum.items():
+            fila_calc = [centro] + [vals.get(mc, 0.0) for mc in modos_cols]
+            sheet_calc.append_row(fila_calc)
 
     except Exception as e:
-        st.warning(f"No se pudo actualizar la hoja de cálculos: {e}")
+        st.warning(f"No se pudo recalcular la hoja CALCULOS: {e}")
+
 
 # ─────────────────────────────────────────────
 # CSS
@@ -418,6 +507,9 @@ def inyectar_css():
     .aviso-2025 {{ background:#FFE8E8; border-left:5px solid #C00000;
         padding:0.8rem 1rem; border-radius:6px; font-size:0.92rem;
         color:#C00000; margin-bottom:1rem; font-weight:500; }}
+    .aviso-reenvio {{ background:#FFF3E0; border-left:5px solid #FF9800;
+        padding:0.8rem 1rem; border-radius:6px; font-size:0.92rem;
+        color:#E65100; margin-bottom:1rem; font-weight:500; }}
     .exito {{ background:#E8F5E9; border-left:5px solid {COLOR_VERDE};
         padding:0.8rem 1rem; border-radius:6px; margin-bottom:0.8rem; }}
     .centro-tag {{ background:{COLOR_TURQUESA}; color:white; padding:4px 12px;
@@ -432,12 +524,116 @@ def inyectar_css():
         box-shadow:0 1px 3px rgba(0,0,0,0.06); }}
     .modo-box {{ background:{COLOR_FONDO}; border:1px solid #DDD;
         padding:0.8rem 1rem; border-radius:8px; margin-bottom:0.6rem; }}
+    .domicilio-header {{ background:{COLOR_TURQUESA}20; border-left:4px solid {COLOR_TURQUESA};
+        padding:0.5rem 0.8rem; border-radius:4px; margin-bottom:0.6rem;
+        font-weight:600; color:{COLOR_GRIS}; }}
     .stButton > button {{ background-color:{COLOR_TURQUESA} !important;
         color:white !important; border:none !important; border-radius:8px !important;
         font-weight:bold !important; padding:0.6rem 1.2rem !important; }}
     .stButton > button:hover {{ background-color:{COLOR_VERDE} !important; }}
     </style>
     """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# BLOQUE DE MODOS DE TRANSPORTE POR DOMICILIO
+# ─────────────────────────────────────────────
+def render_modos_domicilio(centro, d_idx, dom_label, T, idioma):
+    """
+    Renderiza el bloque de selección de modos de transporte
+    para un centro y un domicilio concretos.
+    Devuelve lista de {modo, combustible, pct_modo} y un booleano todo_ok.
+    """
+    key_n    = f"n_modos_{centro}_{d_idx}"
+    if key_n not in st.session_state:
+        st.session_state[key_n] = 1
+
+    n_modos     = st.session_state[key_n]
+    modos_lista = []
+    pct_total   = 0
+    todo_ok     = True
+
+    st.markdown(
+        f'<div class="domicilio-header">🏠 {dom_label}</div>',
+        unsafe_allow_html=True
+    )
+
+    for i in range(n_modos):
+        st.markdown('<div class="modo-box">', unsafe_allow_html=True)
+
+        modo = st.selectbox(
+            f"{T['modo_label']} {i+1}",
+            options=[T["selecciona"]] + TODOS_MODOS,
+            format_func=lambda x: T["modos_display"].get(x, x) if x != T["selecciona"] else x,
+            key=f"modo_{centro}_{d_idx}_{i}"
+        )
+
+        combustible = "—"
+        if n_modos > 1:
+            if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
+                col_comb, col_pct, col_del = st.columns([3, 2, 1])
+                with col_comb:
+                    combustible = st.selectbox(
+                        T["combustible_label"],
+                        options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
+                        format_func=lambda x: COMBUSTIBLE_DISPLAY[idioma].get(x, x) if x != T["selecciona"] else x,
+                        key=f"comb_{centro}_{d_idx}_{i}"
+                    )
+                    if combustible == T["selecciona"]:
+                        combustible = "—"
+            else:
+                col_pct, col_del = st.columns([4, 1])
+
+            with col_pct:
+                with st.expander("ℹ️"):
+                    st.caption(T["pct_tooltip"])
+                pct_modo = st.number_input(
+                    T["pct_uso"],
+                    min_value=1, max_value=99,
+                    value=50,
+                    key=f"pct_{centro}_{d_idx}_{i}",
+                )
+            with col_del:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if i > 0 and st.button(T["eliminar_modo"], key=f"del_{centro}_{d_idx}_{i}"):
+                    st.session_state[key_n] = n_modos - 1
+                    st.rerun()
+        else:
+            if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
+                combustible = st.selectbox(
+                    T["combustible_label"],
+                    options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
+                    format_func=lambda x: COMBUSTIBLE_DISPLAY[idioma].get(x, x) if x != T["selecciona"] else x,
+                    key=f"comb_{centro}_{d_idx}_{i}"
+                )
+                if combustible == T["selecciona"]:
+                    combustible = "—"
+            pct_modo = 100
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if modo == T["selecciona"]:
+            todo_ok = False
+        else:
+            pct_total += pct_modo
+            modos_lista.append({
+                "modo": modo,
+                "combustible": combustible,
+                "pct_modo": pct_modo
+            })
+
+    # Botón añadir modo
+    if n_modos < 5:
+        if st.button(T["anadir_modo"], key=f"add_{centro}_{d_idx}"):
+            st.session_state[key_n] = n_modos + 1
+            st.rerun()
+
+    # Validar porcentajes
+    if n_modos > 1 and modos_lista and round(pct_total) != 100:
+        st.warning(T["error_pct"])
+        todo_ok = False
+
+    return modos_lista, todo_ok
+
 
 # ─────────────────────────────────────────────
 # APP PRINCIPAL
@@ -516,10 +712,7 @@ def main():
             """, unsafe_allow_html=True)
 
     # ── AVISO 2025 ────────────────────────────
-    st.markdown(f"""
-    <div class="aviso-2025">{T['aviso_2025']}</div>
-    """, unsafe_allow_html=True)
-
+    st.markdown(f'<div class="aviso-2025">{T["aviso_2025"]}</div>', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="aviso">
     ⚖️ <strong>{T['aviso_titulo']}:</strong> {T['aviso_texto']}
@@ -561,6 +754,15 @@ def main():
     st.markdown(f'<div class="exito">{T["bienvenido"]} <strong>{nombre}</strong></div>',
                 unsafe_allow_html=True)
 
+    # ── COMPROBACIÓN DE ENVÍO PREVIO ──────────
+    envio_anterior = obtener_envio_anterior(codigo)
+    if envio_anterior > 0:
+        st.markdown(
+            f'<div class="aviso-reenvio">{T["aviso_reenvio"].format(envio_anterior)}</div>',
+            unsafe_allow_html=True
+        )
+    nuevo_envio_num = envio_anterior + 1
+
     # ── PASO 2: DATOS ─────────────────────────
     st.markdown(f'<div class="seccion-titulo">{T["tus_datos"]}</div>',
                 unsafe_allow_html=True)
@@ -590,21 +792,18 @@ def main():
     st.markdown(f'<div class="seccion-titulo">{T["domicilio_habitual"]}</div>',
                 unsafe_allow_html=True)
 
-    # Inicializar número de domicilios
     if "n_domicilios" not in st.session_state:
         st.session_state["n_domicilios"] = 1
 
-    # Lista de domicilios: [{calle, municipio, cp, pct, corregido}]
-    domicilios = []
+    domicilios  = []
     dom_pct_total = 0
-    dom_valido = True
+    dom_valido  = True
 
     for d_idx in range(st.session_state["n_domicilios"]):
         label = f"**{T['domicilio_1'] if d_idx == 0 else T['domicilio_2']}**"
         st.markdown(label)
 
         if d_idx == 0:
-            # Primer domicilio: preguntar si es correcto
             dom_correcto = st.radio(
                 T["domicilio_correcto"],
                 options=[T["si_correcto"], T["no_correcto"]],
@@ -620,9 +819,9 @@ def main():
                 if not dom_calle or not dom_muni or not dom_cp:
                     st.warning(T["aviso_domicilio"])
                     dom_valido = False
-                    dom_calle = domicilio_original
-                    dom_muni  = municipio_original
-                    dom_cp    = cp_original
+                    dom_calle  = domicilio_original
+                    dom_muni   = municipio_original
+                    dom_cp     = cp_original
                 corregido = True
             else:
                 dom_calle = domicilio_original
@@ -630,7 +829,6 @@ def main():
                 dom_cp    = cp_original
                 corregido = False
         else:
-            # Segundo domicilio: directamente campos para rellenar
             st.markdown(f"**{T['introduce_domicilio']}**")
             c1, c2, c3 = st.columns([3, 1, 1])
             with c1: dom_calle = st.text_input(T["calle"], placeholder="Ej: Calle Mayor 5 2A", key=f"dom_calle_{d_idx}")
@@ -639,9 +837,9 @@ def main():
             if not dom_calle or not dom_muni or not dom_cp:
                 st.warning(T["aviso_domicilio"])
                 dom_valido = False
-                dom_calle = ""
-                dom_muni  = ""
-                dom_cp    = ""
+                dom_calle  = ""
+                dom_muni   = ""
+                dom_cp     = ""
             corregido = True
 
         pct_dom = 100
@@ -660,10 +858,10 @@ def main():
 
         domicilios.append({
             "calle": dom_calle, "municipio": dom_muni, "cp": dom_cp,
-            "pct": pct_dom, "corregido": corregido
+            "pct": pct_dom, "corregido": corregido,
+            "label": T['domicilio_1'] if d_idx == 0 else T['domicilio_2']
         })
 
-    # Botón añadir/eliminar segundo domicilio
     if st.session_state["n_domicilios"] == 1:
         if st.button(T["anadir_domicilio"], key="add_domicilio"):
             st.session_state["n_domicilios"] = 2
@@ -680,11 +878,12 @@ def main():
         st.stop()
 
     # ── PASO 4: TRANSPORTE ────────────────────
+    # Ahora los modos se configuran POR DOMICILIO dentro de cada centro
     st.markdown(f'<div class="seccion-titulo">{T["modo_transporte"]}</div>',
                 unsafe_allow_html=True)
     st.caption(T["modo_caption"])
 
-    # Estructura: {centro: [{modo, combustible, pct}, ...]}
+    # Estructura: {centro: [{domicilio_idx, modos:[{modo,combustible,pct_modo}]}]}
     modos_por_centro = {}
     todo_completado  = True
 
@@ -696,92 +895,22 @@ def main():
             pct_txt_centro = f"Denboraren %{pct}ean"
         else:
             pct_txt_centro = f"{pct}% {T['denboraren']}"
+
         st.markdown(f"**🏢 {centro}** ({pct_txt_centro})")
 
-        # Inicializar modos en session_state
-        key_n = f"n_modos_{centro}"
-        if key_n not in st.session_state:
-            st.session_state[key_n] = 1
-
-        n_modos = st.session_state[key_n]
         modos_centro = []
-        pct_total = 0
 
-        for i in range(n_modos):
-            st.markdown(f'<div class="modo-box">', unsafe_allow_html=True)
-
-            modo = st.selectbox(
-                f"{T['modo_label']} {i+1}",
-                options=[T["selecciona"]] + TODOS_MODOS,
-                format_func=lambda x: T["modos_display"].get(x, x) if x != T["selecciona"] else x,
-                key=f"modo_{centro}_{i}"
+        for d_idx, dom in enumerate(domicilios):
+            dom_label = f"{dom['label']} — {dom['municipio']} ({dom['pct']}%)"
+            modos_lista, todo_ok = render_modos_domicilio(
+                centro, d_idx, dom_label, T, idioma
             )
-
-            combustible = "—"
-            if n_modos > 1:
-                if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
-                    col_comb, col_pct, col_del = st.columns([3, 2, 1])
-                    with col_comb:
-                        combustible = st.selectbox(
-                            T["combustible_label"],
-                            options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
-                            format_func=lambda x: COMBUSTIBLE_DISPLAY[idioma].get(x, x) if x != T["selecciona"] else x,
-                            key=f"comb_{centro}_{i}"
-                        )
-                        if combustible == T["selecciona"]:
-                            combustible = "—"
-                else:
-                    col_pct, col_del = st.columns([4, 1])
-
-                with col_pct:
-                    with st.expander("ℹ️"):
-                        st.caption(T["pct_tooltip"])
-                    pct_modo = st.number_input(
-                        T["pct_uso"],
-                        min_value=1, max_value=99,
-                        value=50,
-                        key=f"pct_{centro}_{i}",
-                    )
-
-                with col_del:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if i > 0 and st.button(T["eliminar_modo"], key=f"del_{centro}_{i}"):
-                        st.session_state[key_n] = n_modos - 1
-                        st.rerun()
-            else:
-                if modo != T["selecciona"] and modo in VEHICULOS_CON_COMBUSTIBLE:
-                    combustible = st.selectbox(
-                        T["combustible_label"],
-                        options=[T["selecciona"]] + TIPOS_COMBUSTIBLE,
-                        format_func=lambda x: COMBUSTIBLE_DISPLAY[idioma].get(x, x) if x != T["selecciona"] else x,
-                        key=f"comb_{centro}_{i}"
-                    )
-                    if combustible == T["selecciona"]:
-                        combustible = "—"
-                pct_modo = 100
-
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            if modo == T["selecciona"]:
+            if not todo_ok:
                 todo_completado = False
-            else:
-                pct_total += pct_modo
-                modos_centro.append({
-                    "modo": modo,
-                    "combustible": combustible,
-                    "pct_modo": pct_modo
-                })
-
-        # Botón añadir modo
-        if n_modos < 5:
-            if st.button(T["anadir_modo"], key=f"add_{centro}"):
-                st.session_state[key_n] = n_modos + 1
-                st.rerun()
-
-        # Validar que suman 100%
-        if n_modos > 1 and modos_centro and round(pct_total) != 100:
-            st.warning(T["error_pct"])
-            todo_completado = False
+            modos_centro.append({
+                "d_idx":  d_idx,
+                "modos":  modos_lista
+            })
 
         modos_por_centro[centro] = modos_centro
         st.markdown("---")
@@ -826,8 +955,8 @@ def main():
                     errores.append(centro)
                     continue
 
-                # Calcular km por separado para cada domicilio
-                for dom_geo in domicilios_geo:
+                # Para cada domicilio, calcular km con sus propios modos
+                for d_idx, dom_geo in enumerate(domicilios_geo):
                     km = calcular_km(
                         (dom_geo["lon"], dom_geo["lat"]),
                         (cd.iloc[0]["LON"], cd.iloc[0]["LAT"]),
@@ -837,31 +966,52 @@ def main():
                         errores.append(f"{centro} ({dom_geo['municipio']})")
                         continue
 
-                    dom_corregido_txt = ("Bai" if dom_geo["corregido"] else "Ez") if idioma == "eu" else ("Sí" if dom_geo["corregido"] else "No")
+                    dom_corregido_txt = (
+                        ("Bai" if dom_geo["corregido"] else "Ez")
+                        if idioma == "eu"
+                        else ("Sí" if dom_geo["corregido"] else "No")
+                    )
 
-                    for m in modos_por_centro.get(centro, []):
+                    # Obtener los modos específicos de este domicilio para este centro
+                    modos_dom = next(
+                        (mc["modos"] for mc in modos_por_centro.get(centro, [])
+                         if mc["d_idx"] == d_idx),
+                        []
+                    )
+
+                    for m in modos_dom:
                         modo        = m["modo"]
                         combustible = m["combustible"]
                         pct_modo    = m["pct_modo"] / 100
 
                         km_anuales = round(
-                            km * 2 * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025)
-                            * pct_jornada * (imputacion / 100) * pct_modo * (dom_geo["pct"] / 100), 2
+                            km * 2
+                            * (dias_trab / DIAS_BASE * DIAS_LABORABLES_2025)
+                            * pct_jornada
+                            * (imputacion / 100)
+                            * pct_modo
+                            * (dom_geo["pct"] / 100),
+                            2
                         )
 
-                        modo_es = TEXTOS["es"]["modos_display"].get(modo, modo)
-                        comb_es = COMBUSTIBLE_DISPLAY["es"].get(combustible, combustible)
+                        modo_es      = TEXTOS["es"]["modos_display"].get(modo, modo)
+                        comb_es      = COMBUSTIBLE_DISPLAY["es"].get(combustible, combustible)
                         modo_display = T["modos_display"].get(modo, modo)
                         comb_display = COMBUSTIBLE_DISPLAY[idioma].get(combustible, combustible)
 
                         resultados.append({
-                            "centro": centro, "imputacion": imputacion,
-                            "km": km, "km_ida_vuelta_anuales": km_anuales,
-                            "modo": modo_es, "combustible": comb_es,
-                            "modo_display": modo_display, "comb_display": comb_display,
-                            "pct_modo": int(m["pct_modo"]),
-                            "domicilio": f"{dom_geo['calle']}, {dom_geo['municipio']}",
-                            "pct_dom": dom_geo["pct"],
+                            "centro":              centro,
+                            "imputacion":          imputacion,
+                            "km":                  km,
+                            "km_ida_vuelta_anuales": km_anuales,
+                            "modo":                modo_es,
+                            "combustible":         comb_es,
+                            "modo_display":        modo_display,
+                            "comb_display":        comb_display,
+                            "pct_modo":            int(m["pct_modo"]),
+                            "domicilio":           f"{dom_geo['calle']}, {dom_geo['municipio']}",
+                            "pct_dom":             dom_geo["pct"],
+                            "dom_label":           dom_geo["label"],
                         })
 
                         filas_sheets.append([
@@ -872,6 +1022,7 @@ def main():
                             centro, imputacion, km, km_anuales,
                             modo_display, comb_display, int(m["pct_modo"]),
                             dom_corregido_txt,
+                            nuevo_envio_num,          # ← ENVIO_NUM
                         ])
 
         if resultados:
@@ -885,9 +1036,13 @@ def main():
                     else:
                         pct_label = f"{r['imputacion']}% {T['denboraren']}"
                     st.markdown(f"**🏢 {r['centro']}** ({pct_label})")
+
                 comb_txt = f" — {r['comb_display']}" if r['combustible'] not in ["—",""] else ""
                 pct_txt  = f" ({r['pct_modo']}%)" if r["pct_modo"] < 100 else ""
-                dom_txt  = f"🏠 {r.get('domicilio', '')} ({r.get('pct_dom', 100)}%)<br>" if len(domicilios_geo) > 1 else ""
+                dom_txt  = (
+                    f"🏠 {r.get('dom_label','')} — {r.get('domicilio', '')} ({r.get('pct_dom', 100)}%)<br>"
+                    if len(domicilios_geo) > 1 else ""
+                )
                 st.markdown(f"""
                 <div class="km-box">
                 {dom_txt}🚗 {r['modo_display']}{comb_txt}{pct_txt}<br>
@@ -901,7 +1056,8 @@ def main():
 
             client = guardar_en_sheets(filas_sheets)
             if client:
-                actualizar_sheet_calculos(client, resultados)
+                # Recalcular CALCULOS desde cero con solo el último envío de cada empleado
+                recalcular_sheet_calculos(client)
                 st.session_state["datos_enviados"] = True
                 st.session_state["piloto_codigo"]  = codigo
                 st.session_state["piloto_correo"]  = correo_input
@@ -916,14 +1072,14 @@ def main():
         else:
             st.error(T["error_distancias"])
 
-    # ── FORMULARIO PILOTO — fuera del botón calcular ──
+    # ── FORMULARIO PILOTO ─────────────────────
     if st.session_state.get("datos_enviados"):
-        idioma_p  = st.session_state.get("piloto_idioma", idioma)
-        TP        = TEXTOS[idioma_p]
-        codigo_p  = st.session_state["piloto_codigo"]
-        correo_p  = st.session_state["piloto_correo"]
-        nombre_p  = st.session_state["piloto_nombre"]
-        client_p  = st.session_state["piloto_client"]
+        idioma_p = st.session_state.get("piloto_idioma", idioma)
+        TP       = TEXTOS[idioma_p]
+        codigo_p = st.session_state["piloto_codigo"]
+        correo_p = st.session_state["piloto_correo"]
+        nombre_p = st.session_state["piloto_nombre"]
+        client_p = st.session_state["piloto_client"]
 
         st.markdown("---")
         st.markdown(f'<div class="seccion-titulo">{TP["piloto_titulo"]}</div>',
