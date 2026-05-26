@@ -56,6 +56,13 @@ TEXTOS = {
         "domicilio_registrado": "📍 Helbidea erregistratu da:",
         "centros_trabajo": "2025eko lan zentroak:",
         "domicilio_habitual": "🏠 Ohiko bizilekua",
+        "anadir_domicilio": "➕ Bigarren helbidea gehitu (2025ean bizilekuz aldatu bazara)",
+        "eliminar_domicilio": "✕ Bigarren helbidea kendu",
+        "domicilio_1": "1. helbidea",
+        "domicilio_2": "2. helbidea",
+        "pct_domicilio": "Denbora %",
+        "pct_domicilio_tooltip": "Estimazioa: 2025ean zenbat denbora eman zenuen helbide honetan. Adibidez, 6 hilabete bakoitzean egon bazinen, %50/%50 jar dezakezu.",
+        "error_pct_domicilio": "⚠️ Helbideen portzentajeen batura 100% izan behar da.",
         "domicilio_correcto": "Zure ohiko bizilekua zuzena da?",
         "si_correcto": "Bai, zuzena da",
         "no_correcto": "Ez, zuzendu nahi dut",
@@ -87,7 +94,7 @@ TEXTOS = {
         "piloto_subtitulo": "Zure iritzia lagungarria izango da tresna hobetzeko. Minutu bat baino gutxiago irauten du.",
         "piloto_p1": "1. Nola baloratuko zenuke tresna erabiltzeko erreztasuna?",
         "piloto_p1_ops": ["— Hautatu —", "⭐ Oso zaila", "⭐⭐ Zaila", "⭐⭐⭐ Normala", "⭐⭐⭐⭐ Erraza", "⭐⭐⭐⭐⭐ Oso erraza"],
-        "piloto_p2": "2. Zure datuak ondo agertzen ziren sartzean?",
+        "piloto_p2": "2. Zentroen inputazioaren datuak ondo agertzen ziren sartzean? (Ez da helbideari buruzkoa, hori aplikazioan zuzendu daiteke)",
         "piloto_p2_ops": ["— Hautatu —", "✅ Bai, dena zuzen", "⚠️ Akatsen bat zegoen", "❌ Datuak okerrak ziren"],
         "piloto_p3": "3. Ondo ulertu al zenuen tresnak zer eskatzen zizun?",
         "piloto_p3_ops": ["— Hautatu —", "Bai", "Gutxi gorabehera", "Ez"],
@@ -125,6 +132,13 @@ TEXTOS = {
         "domicilio_registrado": "📍 Domicilio registrado:",
         "centros_trabajo": "Centros de trabajo en 2025:",
         "domicilio_habitual": "🏠 Domicilio habitual",
+        "anadir_domicilio": "➕ Añadir segundo domicilio (si te mudaste en 2025)",
+        "eliminar_domicilio": "✕ Eliminar segundo domicilio",
+        "domicilio_1": "1er domicilio",
+        "domicilio_2": "2º domicilio",
+        "pct_domicilio": "% de tiempo",
+        "pct_domicilio_tooltip": "Estimación: qué porcentaje del tiempo de 2025 viviste en este domicilio. Por ejemplo, si estuviste 6 meses en cada uno, pon 50%/50%.",
+        "error_pct_domicilio": "⚠️ Los porcentajes de los domicilios deben sumar 100%.",
         "domicilio_correcto": "¿Tu domicilio habitual es correcto?",
         "si_correcto": "Sí, es correcto",
         "no_correcto": "No, quiero corregirlo",
@@ -156,7 +170,7 @@ TEXTOS = {
         "piloto_subtitulo": "Tu opinión nos ayudará a mejorar la herramienta. Menos de un minuto.",
         "piloto_p1": "1. ¿Cómo valorarías la facilidad de uso de la herramienta?",
         "piloto_p1_ops": ["— Selecciona —", "⭐ Muy difícil", "⭐⭐ Difícil", "⭐⭐⭐ Normal", "⭐⭐⭐⭐ Fácil", "⭐⭐⭐⭐⭐ Muy fácil"],
-        "piloto_p2": "2. ¿Tus datos aparecían correctamente al entrar?",
+        "piloto_p2": "2. ¿Los datos de imputación de centros aparecían correctamente al entrar? (No hace referencia al domicilio, que puede corregirse en la app)",
         "piloto_p2_ops": ["— Selecciona —", "✅ Sí, todo correcto", "⚠️ Había algún error", "❌ Los datos eran incorrectos"],
         "piloto_p3": "3. ¿Entendiste bien qué te pedía la herramienta?",
         "piloto_p3_ops": ["— Selecciona —", "Sí", "Más o menos", "No"],
@@ -576,24 +590,79 @@ def main():
     st.markdown(f'<div class="seccion-titulo">{T["domicilio_habitual"]}</div>',
                 unsafe_allow_html=True)
 
-    dom_correcto = st.radio(T["domicilio_correcto"],
-                            options=[T["si_correcto"], T["no_correcto"]], index=0)
+    # Inicializar número de domicilios
+    if "n_domicilios" not in st.session_state:
+        st.session_state["n_domicilios"] = 1
 
-    domicilio_final = domicilio_original
-    municipio_final = municipio_original
-    cp_final        = cp_original
-    dom_corregido   = False
+    # Lista de domicilios: [{calle, municipio, cp, pct, corregido}]
+    domicilios = []
+    dom_pct_total = 0
+    dom_valido = True
 
-    if dom_correcto == T["no_correcto"]:
-        st.markdown(f"**{T['introduce_domicilio']}**")
-        c1, c2, c3 = st.columns([3, 1, 1])
-        with c1: domicilio_final = st.text_input(T["calle"], placeholder="Ej: Calle Mayor 5 2A")
-        with c2: municipio_final = st.text_input(T["municipio"], placeholder="Ej: Bilbao")
-        with c3: cp_final        = st.text_input(T["cp"], placeholder="Ej: 48001")
-        if not domicilio_final or not municipio_final or not cp_final:
-            st.warning(T["aviso_domicilio"])
-            st.stop()
-        dom_corregido = True
+    for d_idx in range(st.session_state["n_domicilios"]):
+        label = f"**{T['domicilio_1'] if d_idx == 0 else T['domicilio_2']}**"
+        st.markdown(label)
+
+        dom_correcto = st.radio(
+            T["domicilio_correcto"],
+            options=[T["si_correcto"], T["no_correcto"]],
+            index=0,
+            key=f"dom_correcto_{d_idx}"
+        )
+
+        if dom_correcto == T["no_correcto"]:
+            st.markdown(f"**{T['introduce_domicilio']}**")
+            c1, c2, c3 = st.columns([3, 1, 1])
+            with c1: dom_calle = st.text_input(T["calle"], placeholder="Ej: Calle Mayor 5 2A", key=f"dom_calle_{d_idx}")
+            with c2: dom_muni  = st.text_input(T["municipio"], placeholder="Ej: Bilbao", key=f"dom_muni_{d_idx}")
+            with c3: dom_cp    = st.text_input(T["cp"], placeholder="Ej: 48001", key=f"dom_cp_{d_idx}")
+            if not dom_calle or not dom_muni or not dom_cp:
+                st.warning(T["aviso_domicilio"])
+                dom_valido = False
+                dom_calle = domicilio_original
+                dom_muni  = municipio_original
+                dom_cp    = cp_original
+            corregido = True
+        else:
+            dom_calle = domicilio_original
+            dom_muni  = municipio_original
+            dom_cp    = cp_original
+            corregido = False
+
+        pct_dom = 100
+        if st.session_state["n_domicilios"] > 1:
+            col_pct, _ = st.columns([2, 3])
+            with col_pct:
+                with st.expander("ℹ️"):
+                    st.caption(T["pct_domicilio_tooltip"])
+                pct_dom = st.number_input(
+                    T["pct_domicilio"],
+                    min_value=1, max_value=99,
+                    value=50,
+                    key=f"dom_pct_{d_idx}"
+                )
+            dom_pct_total += pct_dom
+
+        domicilios.append({
+            "calle": dom_calle, "municipio": dom_muni, "cp": dom_cp,
+            "pct": pct_dom, "corregido": corregido
+        })
+
+    # Botón añadir/eliminar segundo domicilio
+    if st.session_state["n_domicilios"] == 1:
+        if st.button(T["anadir_domicilio"], key="add_domicilio"):
+            st.session_state["n_domicilios"] = 2
+            st.rerun()
+    else:
+        if st.button(T["eliminar_domicilio"], key="del_domicilio"):
+            st.session_state["n_domicilios"] = 1
+            st.rerun()
+        if round(dom_pct_total) != 100:
+            st.warning(T["error_pct_domicilio"])
+            dom_valido = False
+
+    if not dom_valido:
+        st.stop()
 
     # ── PASO 4: TRANSPORTE ────────────────────
     st.markdown(f'<div class="seccion-titulo">{T["modo_transporte"]}</div>',
@@ -715,11 +784,18 @@ def main():
             st.stop()
 
         with st.spinner(T["spinner"]):
-            lon_orig, lat_orig = geocodificar_nominatim(
-                domicilio_final, municipio_final, cp_final)
+            # Geocodificar todos los domicilios
+            domicilios_geo = []
+            geo_error = False
+            for dom in domicilios:
+                lon, lat = geocodificar_nominatim(dom["calle"], dom["municipio"], dom["cp"])
+                if lon is None:
+                    st.error(T["error_geolocalizacion"])
+                    geo_error = True
+                    break
+                domicilios_geo.append({**dom, "lon": lon, "lat": lat})
 
-            if lon_orig is None:
-                st.error(T["error_geolocalizacion"])
+            if geo_error:
                 st.stop()
 
             resultados   = []
@@ -735,12 +811,30 @@ def main():
                     errores.append(centro)
                     continue
 
-                km = calcular_km((lon_orig, lat_orig),
-                                 (cd.iloc[0]["LON"], cd.iloc[0]["LAT"]),
-                                 ORS_API_KEY)
-                if km is None:
-                    errores.append(centro)
+                # KM ponderado por % de cada domicilio
+                km_ponderado = 0
+                km_error = False
+                for dom_geo in domicilios_geo:
+                    km_dom = calcular_km(
+                        (dom_geo["lon"], dom_geo["lat"]),
+                        (cd.iloc[0]["LON"], cd.iloc[0]["LAT"]),
+                        ORS_API_KEY
+                    )
+                    if km_dom is None:
+                        errores.append(centro)
+                        km_error = True
+                        break
+                    km_ponderado += km_dom * (dom_geo["pct"] / 100)
+
+                if km_error:
                     continue
+                km = round(km_ponderado, 2)
+
+                dom_desc = " + ".join([
+                    f"{d['calle']}, {d['municipio']} ({d['pct']}%)"
+                    for d in domicilios
+                ])
+                dom_corregido_txt = ("Bai" if any(d["corregido"] for d in domicilios) else "Ez") if idioma == "eu" else ("Sí" if any(d["corregido"] for d in domicilios) else "No")
 
                 for m in modos_por_centro.get(centro, []):
                     modo        = m["modo"]
@@ -768,12 +862,11 @@ def main():
                     filas_sheets.append([
                         datetime.now().strftime("%Y-%m-%d %H:%M"),
                         codigo, correo_input, nombre,
-                        f"{domicilio_final}, {municipio_final}",
-                        municipio_final, cp_final,
+                        dom_desc,
+                        domicilios[0]["municipio"], domicilios[0]["cp"],
                         centro, imputacion, km, km_anuales,
                         modo_display, comb_display, int(m["pct_modo"]),
-                        ("Bai" if dom_corregido else "Ez") if idioma == "eu"
-                        else ("Sí" if dom_corregido else "No"),
+                        dom_corregido_txt,
                     ])
 
         if resultados:
